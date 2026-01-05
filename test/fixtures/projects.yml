@@ -1,0 +1,11 @@
+stand_by_me:
+  name: "Stand By Me Reunion"
+  description: "Cast reunion event for Stand By Me"
+  created_at: <%= Time.current %>
+  updated_at: <%= Time.current %>
+
+documentary:
+  name: "Documentary Project"
+  description: "Documentary about filmmaking"
+  created_at: <%= Time.current %>
+  updated_at: <%= Time.current %>

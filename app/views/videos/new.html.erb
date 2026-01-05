@@ -1,0 +1,191 @@
+<div class="mb-6">
+  <%= link_to "&larr; Back".html_safe, videos_path, class: "text-sm text-indigo-600 hover:text-indigo-900" %>
+</div>
+
+<div class="max-w-2xl">
+  <div class="mb-8">
+    <h1 class="text-3xl font-bold text-gray-900">Add Video</h1>
+  </div>
+
+  <%= form_with model: @video, class: "space-y-6" do |form| %>
+    <% if @video.errors.any? %>
+      <div class="rounded-md bg-red-50 p-4">
+        <div class="flex">
+          <div class="flex-shrink-0">
+            <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+            </svg>
+          </div>
+          <div class="ml-3">
+            <h3 class="text-sm font-medium text-red-800">
+              <%= pluralize(@video.errors.count, "error") %> prohibited this video from being saved:
+            </h3>
+            <div class="mt-2 text-sm text-red-700">
+              <ul class="list-disc pl-5 space-y-1">
+                <% @video.errors.each do |error| %>
+                  <li><%= error.full_message %></li>
+                <% end %>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    <% end %>
+
+    <!-- Project Selection -->
+    <div>
+      <%= form.label :project_id, class: "block text-sm font-medium text-gray-700" %>
+      <%= form.collection_select :project_id, @projects, :id, :name, { prompt: "Select a project" }, class: "mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" %>
+    </div>
+
+    <!-- Source Selection Mode Toggle -->
+    <div class="bg-white shadow-sm rounded-lg border border-gray-200 overflow-hidden">
+      <div class="border-b border-gray-200">
+        <nav class="flex -mb-px" aria-label="Tabs">
+          <button type="button" id="tab-select" class="tab-button w-1/2 py-3 px-4 text-center border-b-2 font-medium text-sm border-indigo-500 text-indigo-600">
+            Select from Sources
+          </button>
+          <button type="button" id="tab-manual" class="tab-button w-1/2 py-3 px-4 text-center border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">
+            Manual Entry
+          </button>
+        </nav>
+      </div>
+
+      <!-- Select from Sources Panel -->
+      <div id="panel-select" class="tab-panel">
+        <% if @available_files.any? %>
+          <div class="divide-y divide-gray-200 max-h-80 overflow-y-auto">
+            <% @available_files.each do |file| %>
+              <label class="flex items-center px-4 py-3 hover:bg-gray-50 cursor-pointer group">
+                <input type="radio"
+                       name="selected_file"
+                       value="<%= file[:path] %>"
+                       data-filename="<%= file[:filename] %>"
+                       class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 file-radio">
+                <div class="ml-3 flex-1 min-w-0">
+                  <p class="text-sm font-medium text-gray-900 truncate group-hover:text-indigo-600">
+                    <%= file[:display_name] %>
+                  </p>
+                  <p class="text-xs text-gray-500">
+                    <span class="uppercase font-medium"><%= file[:extension] %></span>
+                    <span class="mx-1">&middot;</span>
+                    <span><%= file[:size_human] %></span>
+                  </p>
+                </div>
+              </label>
+            <% end %>
+          </div>
+        <% else %>
+          <div class="px-6 py-10 text-center">
+            <svg class="mx-auto h-10 w-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
+            </svg>
+            <h3 class="mt-2 text-sm font-medium text-gray-900">No source files available</h3>
+            <p class="mt-1 text-xs text-gray-500">
+              Add video files to <code class="bg-gray-100 px-1 py-0.5 rounded">storage/sources/</code>
+            </p>
+          </div>
+        <% end %>
+      </div>
+
+      <!-- Manual Entry Panel -->
+      <div id="panel-manual" class="tab-panel hidden p-4 space-y-4">
+        <div>
+          <label for="manual_source_path" class="block text-sm font-medium text-gray-700">Source Path</label>
+          <input type="text" id="manual_source_path" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm font-mono text-sm" placeholder="/path/to/video.mp4">
+          <p class="mt-1 text-xs text-gray-500">Full path to the video file</p>
+        </div>
+
+        <div>
+          <label for="manual_filename" class="block text-sm font-medium text-gray-700">Filename</label>
+          <input type="text" id="manual_filename" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" placeholder="video.mp4">
+          <p class="mt-1 text-xs text-gray-500">Display name for the video</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Hidden fields that get populated -->
+    <%= form.hidden_field :source_path, id: "video_source_path" %>
+    <%= form.hidden_field :filename, id: "video_filename" %>
+
+    <!-- Proxy Path (always visible, optional) -->
+    <div>
+      <%= form.label :proxy_path, "Proxy Path (optional)", class: "block text-sm font-medium text-gray-700" %>
+      <%= form.text_field :proxy_path, class: "mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm font-mono text-sm", placeholder: "/path/to/proxy.mp4" %>
+      <p class="mt-1 text-xs text-gray-500">Path to converted proxy file (for .braw files)</p>
+    </div>
+
+    <div class="flex justify-end space-x-3">
+      <%= link_to "Cancel", videos_path, class: "inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50" %>
+      <%= form.submit "Add Video", class: "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 cursor-pointer" %>
+    </div>
+  <% end %>
+</div>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const tabSelect = document.getElementById('tab-select');
+    const tabManual = document.getElementById('tab-manual');
+    const panelSelect = document.getElementById('panel-select');
+    const panelManual = document.getElementById('panel-manual');
+    const fileRadios = document.querySelectorAll('.file-radio');
+    const manualSourcePath = document.getElementById('manual_source_path');
+    const manualFilename = document.getElementById('manual_filename');
+    const hiddenSourcePath = document.getElementById('video_source_path');
+    const hiddenFilename = document.getElementById('video_filename');
+
+    let currentMode = 'select';
+
+    function switchTab(mode) {
+      currentMode = mode;
+
+      // Update tab styles
+      if (mode === 'select') {
+        tabSelect.classList.add('border-indigo-500', 'text-indigo-600');
+        tabSelect.classList.remove('border-transparent', 'text-gray-500');
+        tabManual.classList.remove('border-indigo-500', 'text-indigo-600');
+        tabManual.classList.add('border-transparent', 'text-gray-500');
+        panelSelect.classList.remove('hidden');
+        panelManual.classList.add('hidden');
+      } else {
+        tabManual.classList.add('border-indigo-500', 'text-indigo-600');
+        tabManual.classList.remove('border-transparent', 'text-gray-500');
+        tabSelect.classList.remove('border-indigo-500', 'text-indigo-600');
+        tabSelect.classList.add('border-transparent', 'text-gray-500');
+        panelManual.classList.remove('hidden');
+        panelSelect.classList.add('hidden');
+
+        // Clear file selection when switching to manual
+        fileRadios.forEach(r => r.checked = false);
+      }
+
+      // Clear hidden fields when switching tabs
+      hiddenSourcePath.value = '';
+      hiddenFilename.value = '';
+      manualSourcePath.value = '';
+      manualFilename.value = '';
+    }
+
+    tabSelect.addEventListener('click', () => switchTab('select'));
+    tabManual.addEventListener('click', () => switchTab('manual'));
+
+    // File selection updates hidden fields
+    fileRadios.forEach(function(radio) {
+      radio.addEventListener('change', function() {
+        if (this.checked) {
+          hiddenSourcePath.value = this.value;
+          hiddenFilename.value = this.dataset.filename;
+        }
+      });
+    });
+
+    // Manual entry updates hidden fields on input
+    manualSourcePath.addEventListener('input', function() {
+      hiddenSourcePath.value = this.value;
+    });
+
+    manualFilename.addEventListener('input', function() {
+      hiddenFilename.value = this.value;
+    });
+  });
+</script>

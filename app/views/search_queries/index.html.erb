@@ -1,0 +1,51 @@
+<div class="mb-8">
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-3xl font-bold text-gray-900">Search Queries</h1>
+      <p class="mt-2 text-sm text-gray-600">Find clips by searching through transcripts</p>
+    </div>
+    <div>
+      <%= link_to "New Search", new_search_query_path, class: "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700" %>
+    </div>
+  </div>
+</div>
+
+<% if @search_queries.any? %>
+  <div class="bg-white shadow-sm rounded-lg border border-gray-200 overflow-hidden">
+    <ul class="divide-y divide-gray-200">
+      <% @search_queries.each do |query| %>
+        <li class="hover:bg-gray-50">
+          <%= link_to search_query_path(query), class: "block px-6 py-4" do %>
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="text-sm font-medium text-gray-900"><%= query.query_text %></p>
+                <div class="mt-1 flex items-center text-xs text-gray-500 space-x-3">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
+                    <%= query.match_type.titleize %>
+                  </span>
+                  <span><%= query.project.name %></span>
+                  <span><%= query.matches_count %> matches</span>
+                  <span><%= query.created_at.strftime("%b %d, %Y") %></span>
+                </div>
+              </div>
+              <svg class="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+              </svg>
+            </div>
+          <% end %>
+        </li>
+      <% end %>
+    </ul>
+  </div>
+<% else %>
+  <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
+    <svg class="mx-auto h-16 w-16 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+    </svg>
+    <h3 class="mt-4 text-lg font-medium text-gray-900">No searches yet</h3>
+    <p class="mt-2 text-sm text-gray-500">Create a search query to find clips in your transcribed videos.</p>
+    <div class="mt-6">
+      <%= link_to "New Search", new_search_query_path, class: "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700" %>
+    </div>
+  </div>
+<% end %>

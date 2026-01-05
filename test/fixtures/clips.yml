@@ -1,0 +1,29 @@
+rob_reiner_clip:
+  video: reunion_video
+  title: "Rob Reiner Discussion"
+  start_time: 120.5
+  end_time: 185.25
+  status: pending
+  notes: "Cast discussing working with Rob Reiner"
+  created_at: <%= Time.current %>
+  updated_at: <%= Time.current %>
+
+river_phoenix_clip:
+  video: reunion_video
+  title: "River Phoenix Memories"
+  start_time: 450.0
+  end_time: 520.0
+  status: pending
+  notes: "Remembering River Phoenix"
+  created_at: <%= Time.current %>
+  updated_at: <%= Time.current %>
+
+interview_clip:
+  video: interview_video
+  title: "Director Interview"
+  start_time: 60.0
+  end_time: 180.0
+  status: rendered
+  export_path: "/tmp/test_exports/interview_clip.mp4"
+  created_at: <%= Time.current %>
+  updated_at: <%= Time.current %>

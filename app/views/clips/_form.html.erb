@@ -1,0 +1,58 @@
+<%= form_with model: clip, class: "space-y-6" do |form| %>
+  <% if clip.errors.any? %>
+    <div class="rounded-md bg-red-50 p-4">
+      <div class="flex">
+        <div class="flex-shrink-0">
+          <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+          </svg>
+        </div>
+        <div class="ml-3">
+          <h3 class="text-sm font-medium text-red-800">
+            <%= pluralize(clip.errors.count, "error") %> prohibited this clip from being saved:
+          </h3>
+          <div class="mt-2 text-sm text-red-700">
+            <ul class="list-disc pl-5 space-y-1">
+              <% clip.errors.each do |error| %>
+                <li><%= error.full_message %></li>
+              <% end %>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  <% end %>
+
+  <div>
+    <%= form.label :video_id, class: "block text-sm font-medium text-gray-700" %>
+    <%= form.collection_select :video_id, @videos, :id, ->(v) { "#{v.filename} (#{v.project.name})" }, { prompt: "Select a video" }, class: "mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" %>
+  </div>
+
+  <%= form.hidden_field :match_id if clip.match_id %>
+
+  <div>
+    <%= form.label :title, class: "block text-sm font-medium text-gray-700" %>
+    <%= form.text_field :title, class: "mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm", placeholder: "Optional title for this clip" %>
+  </div>
+
+  <div class="grid grid-cols-2 gap-4">
+    <div>
+      <%= form.label :start_time, "Start Time (seconds)", class: "block text-sm font-medium text-gray-700" %>
+      <%= form.number_field :start_time, step: 0.1, class: "mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm", placeholder: "0.0" %>
+    </div>
+    <div>
+      <%= form.label :end_time, "End Time (seconds)", class: "block text-sm font-medium text-gray-700" %>
+      <%= form.number_field :end_time, step: 0.1, class: "mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm", placeholder: "10.0" %>
+    </div>
+  </div>
+
+  <div>
+    <%= form.label :notes, class: "block text-sm font-medium text-gray-700" %>
+    <%= form.text_area :notes, rows: 3, class: "mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm", placeholder: "Optional notes about this clip..." %>
+  </div>
+
+  <div class="flex justify-end space-x-3">
+    <%= link_to "Cancel", clip.persisted? ? clip_path(clip) : clips_path, class: "inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50" %>
+    <%= form.submit class: "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 cursor-pointer" %>
+  </div>
+<% end %>

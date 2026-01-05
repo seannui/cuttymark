@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Wait for PostgreSQL to be ready, then run the given command
+
+until pg_isready -d cuttymark_development -q 2>/dev/null; do
+  sleep 0.5
+done
+
+exec "$@"

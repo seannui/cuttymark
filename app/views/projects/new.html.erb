@@ -1,0 +1,14 @@
+<div class="mb-6">
+  <%= link_to "&larr; Back to Projects".html_safe, projects_path, class: "text-sm text-indigo-600 hover:text-indigo-900" %>
+</div>
+
+<div class="max-w-2xl">
+  <div class="mb-8">
+    <h1 class="text-3xl font-bold text-gray-900">New Project</h1>
+    <p class="mt-2 text-sm text-gray-600">Create a new project to organize your video analysis work.</p>
+  </div>
+
+  <div class="bg-white shadow-sm rounded-lg border border-gray-200 p-6">
+    <%= render "form", project: @project %>
+  </div>
+</div>

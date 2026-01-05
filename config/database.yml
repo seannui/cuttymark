@@ -1,0 +1,49 @@
+# PostgreSQL for primary database, SQLite for queue
+#
+# Requires PostgreSQL 17+ with pgvector extension installed:
+#   brew install postgresql@17 pgvector
+#   createdb cuttymark_development
+#   psql cuttymark_development -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+default_sqlite: &default_sqlite
+  adapter: sqlite3
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+  timeout: 5000
+
+default_postgres: &default_postgres
+  adapter: postgresql
+  encoding: unicode
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+  host: <%= ENV.fetch("PGHOST", "localhost") %>
+  username: <%= ENV.fetch("PGUSER", ENV["USER"]) %>
+  password: <%= ENV.fetch("PGPASSWORD", "") %>
+  gssencmode: disable
+
+development:
+  primary:
+    <<: *default_postgres
+    database: cuttymark_development
+  queue:
+    <<: *default_sqlite
+    database: storage/development_queue.sqlite3
+    migrations_paths: db/queue_migrate
+
+test:
+  primary:
+    <<: *default_postgres
+    database: cuttymark_test
+  queue:
+    <<: *default_sqlite
+    database: storage/test_queue.sqlite3
+    migrations_paths: db/queue_migrate
+
+production:
+  primary:
+    <<: *default_postgres
+    database: cuttymark_production
+    username: <%= ENV["CUTTYMARK_DATABASE_USERNAME"] %>
+    password: <%= ENV["CUTTYMARK_DATABASE_PASSWORD"] %>
+  queue:
+    <<: *default_sqlite
+    database: storage/production_queue.sqlite3
+    migrations_paths: db/queue_migrate

@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title><%= content_for(:title) || "Cuttymark" %></title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="application-name" content="Cuttymark">
+    <meta name="mobile-web-app-capable" content="yes">
+    <%= csrf_meta_tags %>
+    <%= csp_meta_tag %>
+
+    <%= yield :head %>
+
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+    <link rel="icon" type="image/svg+xml" href="/icon.svg">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="manifest" href="/site.webmanifest">
+    <meta name="theme-color" content="#1e3a5f">
+
+    <%# Tailwind CSS via CDN %>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+
+    <%# Includes all stylesheet files in app/assets/stylesheets %>
+    <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
+    <%= javascript_importmap_tags %>
+  </head>
+
+  <body class="bg-gray-50 min-h-screen">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-sm border-b border-gray-200">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex justify-between h-16">
+          <div class="flex">
+            <%= link_to root_path, class: "flex-shrink-0 flex items-center hover:opacity-80" do %>
+              <svg class="h-8 w-8 mr-2" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="256" cy="256" r="256" fill="#1e3a5f"/>
+                <path d="M80 340 Q256 380 432 340 L400 360 Q256 390 112 360 Z" fill="#c9a227"/>
+                <g transform="translate(256, 320) rotate(-12)">
+                  <path d="M0 0 L-8 -200 L0 -280 L8 -200 Z" fill="#e8e8e8"/>
+                </g>
+                <g transform="translate(256, 320) rotate(12)">
+                  <path d="M0 0 L-8 -200 L0 -280 L8 -200 Z" fill="#e8e8e8"/>
+                </g>
+                <circle cx="256" cy="320" r="12" fill="#c9a227"/>
+                <path d="M256 60 L200 280 L256 300 Z" fill="#f5f5f5" opacity="0.9"/>
+                <path d="M256 60 L312 280 L256 300 Z" fill="#e0e0e0" opacity="0.9"/>
+              </svg>
+              <span class="text-xl font-bold" style="color: #1e3a5f;">Cuttymark</span>
+            <% end %>
+            <div class="hidden sm:ml-6 sm:flex sm:space-x-8">
+              <%= link_to "Projects", projects_path,
+                  class: "#{request.path.start_with?('/projects') || request.path == '/' ? 'border-indigo-500 text-gray-900' : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'} inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium" %>
+              <%= link_to "Videos", videos_path,
+                  class: "#{request.path.start_with?('/videos') ? 'border-indigo-500 text-gray-900' : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'} inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium" %>
+              <%= link_to "Search", search_queries_path,
+                  class: "#{request.path.start_with?('/search') ? 'border-indigo-500 text-gray-900' : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'} inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium" %>
+              <%= link_to "Clips", clips_path,
+                  class: "#{request.path.start_with?('/clips') ? 'border-indigo-500 text-gray-900' : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'} inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium" %>
+            </div>
+          </div>
+
+          <!-- Right-aligned Tools dropdown -->
+          <div class="hidden sm:flex sm:items-center">
+            <div class="relative" data-controller="dropdown">
+              <button type="button"
+                      data-dropdown-target="button"
+                      data-action="click->dropdown#toggle"
+                      aria-expanded="false"
+                      class="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 focus:outline-none">
+                Tools
+                <svg class="ml-1 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              <div data-dropdown-target="menu"
+                   class="hidden absolute right-0 mt-2 w-48 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-50">
+                <div class="py-1">
+                  <% if defined?(MissionControl::Jobs::Engine) %>
+                    <%= link_to "Background Jobs", "/jobs",
+                        class: "block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" %>
+                  <% end %>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="py-6">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <% if notice.present? %>
+          <div class="mb-4 rounded-md bg-green-50 p-4">
+            <div class="flex">
+              <div class="flex-shrink-0">
+                <svg class="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                </svg>
+              </div>
+              <div class="ml-3">
+                <p class="text-sm font-medium text-green-800"><%= notice %></p>
+              </div>
+            </div>
+          </div>
+        <% end %>
+
+        <% if alert.present? %>
+          <div class="mb-4 rounded-md bg-red-50 p-4">
+            <div class="flex">
+              <div class="flex-shrink-0">
+                <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                </svg>
+              </div>
+              <div class="ml-3">
+                <p class="text-sm font-medium text-red-800"><%= alert %></p>
+              </div>
+            </div>
+          </div>
+        <% end %>
+
+        <%= yield %>
+      </div>
+    </main>
+  </body>
+</html>

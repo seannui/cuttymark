@@ -1,0 +1,209 @@
+<div class="mb-6">
+  <%= link_to "&larr; Back to Video".html_safe, video_path(@clip.video), class: "text-sm text-indigo-600 hover:text-indigo-900" %>
+</div>
+
+<div class="mb-8">
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-3xl font-bold text-gray-900"><%= @clip.display_title %></h1>
+      <p class="mt-2 text-sm text-gray-600">
+        From: <%= link_to @clip.video.filename, video_path(@clip.video), class: "text-indigo-600 hover:text-indigo-900" %>
+      </p>
+    </div>
+    <div class="flex space-x-3">
+      <%= link_to "Edit", edit_clip_path(@clip), class: "inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50" %>
+      <% unless @clip.rendered? %>
+        <%= button_to "Render Clip", render_clip_clip_path(@clip), method: :post, class: "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700" %>
+      <% end %>
+    </div>
+  </div>
+</div>
+
+<!-- Clip Info Cards -->
+<div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+  <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+    <div class="flex items-center">
+      <div class="p-3 rounded-full bg-blue-100 text-blue-600">
+        <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      </div>
+      <div class="ml-4">
+        <p class="text-sm font-medium text-gray-500">Duration</p>
+        <p class="text-xl font-semibold text-gray-900"><%= @clip.duration_formatted %></p>
+      </div>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+    <div class="flex items-center">
+      <div class="p-3 rounded-full bg-green-100 text-green-600">
+        <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+        </svg>
+      </div>
+      <div class="ml-4">
+        <p class="text-sm font-medium text-gray-500">Start</p>
+        <p class="text-xl font-semibold text-gray-900 font-mono"><%= @clip.time_range_formatted.split(" - ").first %></p>
+      </div>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+    <div class="flex items-center">
+      <div class="p-3 rounded-full bg-orange-100 text-orange-600">
+        <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+        </svg>
+      </div>
+      <div class="ml-4">
+        <p class="text-sm font-medium text-gray-500">End</p>
+        <p class="text-xl font-semibold text-gray-900 font-mono"><%= @clip.time_range_formatted.split(" - ").last %></p>
+      </div>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+    <div class="flex items-center">
+      <div class="p-3 rounded-full <%= @clip.rendered? ? 'bg-green-100 text-green-600' : @clip.failed? ? 'bg-red-100 text-red-600' : 'bg-yellow-100 text-yellow-600' %>">
+        <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      </div>
+      <div class="ml-4">
+        <p class="text-sm font-medium text-gray-500">Status</p>
+        <p class="text-xl font-semibold text-gray-900"><%= @clip.status.titleize %></p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Clip Details -->
+<div class="bg-white shadow-sm rounded-lg border border-gray-200 overflow-hidden mb-8">
+  <div class="px-6 py-4 border-b border-gray-200">
+    <h2 class="text-lg font-medium text-gray-900">Clip Details</h2>
+  </div>
+  <dl class="divide-y divide-gray-200">
+    <div class="px-6 py-4 grid grid-cols-3 gap-4">
+      <dt class="text-sm font-medium text-gray-500">Source Video</dt>
+      <dd class="text-sm text-gray-900 col-span-2">
+        <%= link_to @clip.video.filename, video_path(@clip.video), class: "text-indigo-600 hover:text-indigo-900" %>
+      </dd>
+    </div>
+    <div class="px-6 py-4 grid grid-cols-3 gap-4">
+      <dt class="text-sm font-medium text-gray-500">Project</dt>
+      <dd class="text-sm text-gray-900 col-span-2">
+        <%= link_to @clip.video.project.name, project_path(@clip.video.project), class: "text-indigo-600 hover:text-indigo-900" %>
+      </dd>
+    </div>
+    <div class="px-6 py-4 grid grid-cols-3 gap-4">
+      <dt class="text-sm font-medium text-gray-500">Source Path</dt>
+      <dd class="text-sm text-gray-900 col-span-2 font-mono text-xs break-all"><%= @clip.source_path %></dd>
+    </div>
+    <% if @clip.export_path.present? %>
+      <div class="px-6 py-4 grid grid-cols-3 gap-4">
+        <dt class="text-sm font-medium text-gray-500">Export Path</dt>
+        <dd class="text-sm text-gray-900 col-span-2 font-mono text-xs break-all"><%= @clip.export_path %></dd>
+      </div>
+    <% end %>
+    <% if @clip.notes.present? %>
+      <div class="px-6 py-4 grid grid-cols-3 gap-4">
+        <dt class="text-sm font-medium text-gray-500">Notes</dt>
+        <dd class="text-sm text-gray-900 col-span-2"><%= @clip.notes %></dd>
+      </div>
+    <% end %>
+  </dl>
+</div>
+
+<!-- Export Options -->
+<div class="bg-white shadow-sm rounded-lg border border-gray-200 overflow-hidden mb-8">
+  <div class="px-6 py-4 border-b border-gray-200">
+    <h2 class="text-lg font-medium text-gray-900">Export Options</h2>
+  </div>
+  <div class="p-6">
+    <%= form_with url: clip_export_path(@clip), method: :post, class: "space-y-6" do |f| %>
+      <div>
+        <h3 class="text-sm font-medium text-gray-700 mb-3">Video Export</h3>
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+          <label class="flex items-center space-x-2 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
+            <input type="radio" name="format_type" value="mp4_copy" class="text-indigo-600">
+            <div>
+              <span class="text-sm font-medium text-gray-900">MP4 (Fast)</span>
+              <p class="text-xs text-gray-500">Stream copy</p>
+            </div>
+          </label>
+          <label class="flex items-center space-x-2 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
+            <input type="radio" name="format_type" value="mp4_high" class="text-indigo-600">
+            <div>
+              <span class="text-sm font-medium text-gray-900">MP4 High</span>
+              <p class="text-xs text-gray-500">H.264 CRF 18</p>
+            </div>
+          </label>
+          <label class="flex items-center space-x-2 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
+            <input type="radio" name="format_type" value="mp4_web" class="text-indigo-600">
+            <div>
+              <span class="text-sm font-medium text-gray-900">MP4 Web</span>
+              <p class="text-xs text-gray-500">Optimized</p>
+            </div>
+          </label>
+          <label class="flex items-center space-x-2 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
+            <input type="radio" name="format_type" value="prores_422" class="text-indigo-600">
+            <div>
+              <span class="text-sm font-medium text-gray-900">ProRes 422</span>
+              <p class="text-xs text-gray-500">For editing</p>
+            </div>
+          </label>
+          <label class="flex items-center space-x-2 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
+            <input type="radio" name="format_type" value="prores_hq" class="text-indigo-600">
+            <div>
+              <span class="text-sm font-medium text-gray-900">ProRes HQ</span>
+              <p class="text-xs text-gray-500">High quality</p>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <div>
+        <h3 class="text-sm font-medium text-gray-700 mb-3">Edit Lists (Download)</h3>
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+          <label class="flex items-center space-x-2 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
+            <input type="radio" name="format_type" value="premiere_xml" class="text-indigo-600">
+            <div>
+              <span class="text-sm font-medium text-gray-900">Premiere XML</span>
+              <p class="text-xs text-gray-500">Adobe Premiere</p>
+            </div>
+          </label>
+          <label class="flex items-center space-x-2 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
+            <input type="radio" name="format_type" value="fcpxml" class="text-indigo-600">
+            <div>
+              <span class="text-sm font-medium text-gray-900">FCPXML</span>
+              <p class="text-xs text-gray-500">Final Cut Pro</p>
+            </div>
+          </label>
+          <label class="flex items-center space-x-2 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
+            <input type="radio" name="format_type" value="edl" class="text-indigo-600">
+            <div>
+              <span class="text-sm font-medium text-gray-900">EDL</span>
+              <p class="text-xs text-gray-500">CMX 3600</p>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <div class="pt-4 border-t border-gray-200">
+        <%= f.submit "Export Clip", class: "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 cursor-pointer" %>
+      </div>
+    <% end %>
+  </div>
+</div>
+
+<!-- FFmpeg Command -->
+<div class="bg-white shadow-sm rounded-lg border border-gray-200 overflow-hidden">
+  <div class="px-6 py-4 border-b border-gray-200">
+    <h2 class="text-lg font-medium text-gray-900">FFmpeg Command</h2>
+  </div>
+  <div class="p-6">
+    <p class="text-sm text-gray-500 mb-3">Copy this command to render the clip manually:</p>
+    <pre class="text-xs bg-gray-800 text-green-400 rounded-lg p-4 overflow-x-auto"><code>ffmpeg -ss <%= @clip.start_time %> -i "<%= @clip.source_path %>" -t <%= @clip.duration %> -c copy "clip_<%= @clip.id %>.mp4"</code></pre>
+  </div>
+</div>
