@@ -4,7 +4,7 @@ Cuttymark is a Rails application for analyzing video files, matching spoken cont
 
 ## Features
 
-- **Video Transcription**: Automatic speech-to-text using Whisper (local)
+- **Video Transcription**: Automatic speech-to-text using Whisper (local) or Gemini (cloud)
 - **Semantic Search**: Find clips by meaning, not just keywords, using embeddings
 - **Smart Clip Boundaries**: Automatically detect topic changes to create coherent clips
 - **Multiple Export Formats**: FFmpeg commands, Adobe Premiere XML, Final Cut Pro FCPXML
@@ -114,7 +114,41 @@ ollama list
 
 You should see `nomic-embed-text` in the list.
 
-### 7. Configure the Database
+### 7. (Optional) Configure Gemini API
+
+As an alternative to local Whisper transcription, you can use Google's Gemini API for cloud-based transcription. Gemini offers:
+
+- **Speaker diarization** (automatic speaker labels)
+- **No local GPU required**
+- **Fast processing** via cloud infrastructure
+- **Low cost** (~$0.02 for a 1.5 hour video with Gemini Flash)
+
+To use Gemini:
+
+1. Get an API key from [Google AI Studio](https://aistudio.google.com/app/apikey)
+
+2. Set the environment variable:
+
+```bash
+export GEMINI_API_KEY=your_api_key_here
+```
+
+3. (Optional) Set Gemini as the default transcription engine:
+
+```bash
+export TRANSCRIPTION_ENGINE=gemini
+```
+
+4. (Optional) Choose a specific model:
+
+```bash
+# Options: gemini-2.0-flash (default, fast/cheap), gemini-1.5-pro (higher quality)
+export GEMINI_MODEL=gemini-2.0-flash
+```
+
+**Note:** For audio files over 20MB, the Gemini client automatically uses the File API for upload.
+
+### 8. Configure the Database
 
 Update `config/database.yml` if needed, then:
 
@@ -123,7 +157,7 @@ bin/rails db:create
 bin/rails db:migrate
 ```
 
-### 8. Start the Application
+### 9. Start the Application
 
 ```bash
 bin/dev

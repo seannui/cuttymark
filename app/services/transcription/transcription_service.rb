@@ -5,13 +5,17 @@ module Transcription
     # Audio with mean volume below this threshold will be normalized
     LOW_VOLUME_THRESHOLD_DB = -30
 
-    def initialize(whisper_client: nil, ffmpeg_client: nil)
-      @whisper = whisper_client || WhisperClient.new
+    def initialize(engine: nil, ffmpeg_client: nil)
+      @engine = engine
       @ffmpeg = ffmpeg_client || VideoProcessing::FfmpegClient.new
     end
 
-    def transcribe(video, normalize: :auto)
-      Rails.logger.info("Starting transcription for video: #{video.filename} (#{video.id})")
+    def transcribe(video, normalize: :auto, engine: nil)
+      # Use provided engine or fall back to instance/default
+      selected_engine = engine || @engine || ClientFactory.default_engine
+      client = ClientFactory.create(selected_engine)
+
+      Rails.logger.info("Starting transcription for video: #{video.filename} (#{video.id}) using #{client.engine_name}")
 
       # Transition video to transcribing state
       video.start_transcription! if video.may_start_transcription?
@@ -19,19 +23,21 @@ module Transcription
       # Create or find transcript record
       transcript = video.transcript || video.create_transcript!
       transcript.start_processing! if transcript.may_start_processing?
-      transcript.update!(engine: "whisper")
+      transcript.update!(engine: client.engine_name)
 
       begin
         # Extract audio
-        audio_path = extract_audio(video)
+        audio_path = extract_audio(video, engine: selected_engine)
         Rails.logger.info("Audio extracted to: #{audio_path}")
 
-        # Check if normalization is needed
-        audio_path = maybe_normalize_audio(audio_path, normalize)
+        # Check if normalization is needed (primarily for Whisper)
+        if selected_engine.to_sym == :whisper
+          audio_path = maybe_normalize_audio(audio_path, normalize)
+        end
 
-        # Transcribe with Whisper
-        result = @whisper.transcribe(audio_path, word_timestamps: true)
-        Rails.logger.info("Whisper returned #{result.words.size} words")
+        # Transcribe with selected engine
+        result = client.transcribe(audio_path)
+        Rails.logger.info("#{client.engine_name} returned #{result.words.size} words")
 
         # Build segments
         transcript.start_segmenting! if transcript.may_start_segmenting?
@@ -43,8 +49,8 @@ module Transcription
         cleanup_audio(audio_path)
 
         transcript
-      rescue WhisperClient::Error => e
-        handle_error(transcript, video, "Whisper error: #{e.message}")
+      rescue BaseClient::Error => e
+        handle_error(transcript, video, "#{client.engine_name} error: #{e.message}")
         raise Error, e.message
       rescue VideoProcessing::FfmpegClient::Error => e
         handle_error(transcript, video, "FFmpeg error: #{e.message}")
@@ -55,8 +61,9 @@ module Transcription
       end
     end
 
-    def whisper_available?
-      @whisper.health_check
+    def engine_available?(engine = nil)
+      engine ||= @engine || ClientFactory.default_engine
+      ClientFactory.engine_available?(engine)
     end
 
     private
@@ -90,7 +97,7 @@ module Transcription
       normalized_path
     end
 
-    def extract_audio(video)
+    def extract_audio(video, engine: :whisper)
       source_path = video.playable_path
       raise Error, "Video file not found: #{source_path}" unless File.exist?(source_path)
 
@@ -103,13 +110,16 @@ module Transcription
         return cached_audio_path
       end
 
-      Rails.logger.info("Extracting audio from video...")
+      # Determine optimal audio settings for engine
+      sample_rate = engine.to_sym == :gemini ? 48000 : 16000  # Gemini prefers higher quality
+
+      Rails.logger.info("Extracting audio from video (#{sample_rate}Hz)...")
       @ffmpeg.extract_audio(
         source_path,
         output_path: cached_audio_path,
         format: "wav",
-        sample_rate: 16000,  # Whisper expects 16kHz
-        channels: 1          # Mono
+        sample_rate: sample_rate,
+        channels: 1  # Mono
       )
     end
 

@@ -5,9 +5,9 @@
     <% first_class = "text-indigo-600 hover:text-indigo-900 text-sm font-medium" %>
 
     <% if first_opts[:method] && first_opts[:method] != :get %>
-      <%= button_to first_link[:title], first_link[:url], first_opts.merge(class: first_class) %>
+      <%= button_to first_link[:title], first_link[:url], first_opts.merge(class: first_class, data: { turbo_frame: "_top" }) %>
     <% else %>
-      <%= link_to first_link[:title], first_link[:url], first_opts.merge(class: first_class) %>
+      <%= link_to first_link[:title], first_link[:url], first_opts.merge(class: first_class, data: { turbo_frame: "_top" }) %>
     <% end %>
 
     <% if links.size > 1 %>
@@ -36,9 +36,9 @@
                  tabindex: "-1"
                ) %>
             <% if opts[:method] && opts[:method] != :get %>
-              <%= button_to link[:title], link[:url], opts %>
+              <%= button_to link[:title], link[:url], opts.merge(data: { turbo_frame: "_top" }) %>
             <% else %>
-              <%= link_to link[:title], link[:url], opts %>
+              <%= link_to link[:title], link[:url], opts.merge(data: { turbo_frame: "_top" }) %>
             <% end %>
           <% end %>
         </div>

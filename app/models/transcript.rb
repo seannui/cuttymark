@@ -49,4 +49,8 @@ class Transcript < ApplicationRecord
   def sentence_count
     sentence_segments.count
   end
+
+  def clean_hallucinations!
+    Transcription::HallucinationCleaner.new(self).clean!
+  end
 end

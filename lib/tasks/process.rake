@@ -176,6 +176,84 @@ namespace :cuttymark do
     retry_video(video)
   end
 
+  desc "Clean hallucinations from a video transcript"
+  task :clean_hallucinations, [:video_id] => :environment do |_t, args|
+    video_id = args[:video_id]
+    abort "Usage: rake cuttymark:clean_hallucinations[VIDEO_ID]" if video_id.blank?
+
+    video = Video.find(video_id)
+    transcript = video.transcript
+    abort "Video has no transcript" unless transcript
+
+    puts "=" * 60
+    puts "Cleaning hallucinations from: #{video.filename}"
+    puts "=" * 60
+    puts ""
+
+    puts "Before:"
+    puts "  Total segments: #{transcript.segments.count}"
+    puts "  Words: #{transcript.word_segments.count}"
+    puts "  Sentences: #{transcript.sentence_segments.count}"
+    puts ""
+
+    stats = transcript.clean_hallucinations!
+
+    puts "Cleanup stats:"
+    stats.each { |k, v| puts "  #{k}: #{v}" }
+    puts ""
+
+    puts "After:"
+    puts "  Total segments: #{transcript.segments.count}"
+    puts "  Words: #{transcript.word_segments.count}"
+    puts "  Sentences: #{transcript.sentence_segments.count}"
+    puts ""
+  end
+
+  desc "Reprocess a single video from scratch (re-transcribe and re-embed)"
+  task :reprocess, [:video_id, :engine] => :environment do |_t, args|
+    video_id = args[:video_id]
+    engine = args[:engine]&.to_sym
+    abort "Usage: rake cuttymark:reprocess[VIDEO_ID] or rake cuttymark:reprocess[VIDEO_ID,gemini]" if video_id.blank?
+
+    # Validate engine if provided
+    if engine && !Transcription::ClientFactory::ENGINES.key?(engine)
+      abort "Invalid engine: #{engine}. Available: #{Transcription::ClientFactory::ENGINES.keys.join(', ')}"
+    end
+
+    check_dependencies!(engine: engine)
+
+    video = Video.find(video_id)
+    engine_name = engine || Transcription::ClientFactory.default_engine
+    puts "=" * 60
+    puts "Reprocessing: #{video.filename} (ID: #{video.id})"
+    puts "Engine: #{engine_name}"
+    puts "=" * 60
+    puts ""
+
+    # Reset video to fresh state
+    puts "Resetting video..."
+    result = video.reset_for_reprocessing!
+    puts "  Deleted transcript: #{result[:transcript_deleted]}"
+    puts "  Deleted segments: #{result[:segments_deleted]}"
+    puts "  Deleted audio files: #{result[:audio_files_deleted].join(', ')}" if result[:audio_files_deleted].any?
+    puts ""
+
+    # Process synchronously with specified engine
+    puts "Processing video with #{engine_name}..."
+    transcript = video.process!(engine: engine)
+
+    puts ""
+    puts "=" * 60
+    puts "Reprocessing Complete"
+    puts "=" * 60
+    puts "  Engine: #{transcript.engine}"
+    puts "  Words: #{transcript.word_segments.count}"
+    puts "  Sentences: #{transcript.sentence_segments.count}"
+    puts "  Paragraphs: #{transcript.paragraph_segments.count}"
+    puts "  Web UI: http://localhost:3000/videos/#{video.id}"
+    puts ""
+  end
+
   desc "Reprocess all videos from scratch (re-transcribe and re-embed with current settings)"
   task :reprocess_all, [:project_name] => :environment do |_t, args|
     project_name = args[:project_name]
@@ -267,13 +345,29 @@ namespace :cuttymark do
     puts "All jobs completed!"
   end
 
-  def check_dependencies!
-    print "Checking Whisper server... "
-    whisper = Transcription::WhisperClient.new
-    unless whisper.health_check
-      abort "FAILED\n\nWhisper server is not available at #{whisper.instance_variable_get(:@host)}:#{whisper.instance_variable_get(:@port)}"
+  def check_dependencies!(engine: nil)
+    engine ||= Transcription::ClientFactory.default_engine
+
+    case engine.to_sym
+    when :whisper
+      print "Checking Whisper server... "
+      whisper = Transcription::WhisperClient.new
+      unless whisper.health_check
+        abort "FAILED\n\nWhisper server is not available at #{whisper.instance_variable_get(:@host)}:#{whisper.instance_variable_get(:@port)}"
+      end
+      puts "OK"
+    when :gemini
+      print "Checking Gemini API... "
+      begin
+        gemini = Transcription::GeminiClient.new
+        unless gemini.health_check
+          abort "FAILED\n\nGemini API is not available. Check GEMINI_API_KEY."
+        end
+        puts "OK"
+      rescue ArgumentError => e
+        abort "FAILED\n\n#{e.message}"
+      end
     end
-    puts "OK"
 
     print "Checking Ollama server... "
     ollama = Embeddings::OllamaClient.new

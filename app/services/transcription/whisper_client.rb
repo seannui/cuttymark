@@ -3,20 +3,25 @@ require "net/http"
 require "json"
 
 module Transcription
-  class WhisperClient
-    class Error < StandardError; end
-    class ConnectionError < Error; end
-    class TranscriptionError < Error; end
-
+  class WhisperClient < BaseClient
     DEFAULT_HOST = "127.0.0.1"
     DEFAULT_PORT = 3333
+
+    # Whisper parameters to reduce hallucinations
+    DEFAULT_TEMPERATURE = 0.0
+    DEFAULT_NO_SPEECH_THRESHOLD = 0.6
+    DEFAULT_COMPRESSION_RATIO_THRESHOLD = 2.4
 
     def initialize(host: nil, port: nil)
       @host = host || ENV.fetch("WHISPER_HOST", DEFAULT_HOST)
       @port = port || ENV.fetch("WHISPER_PORT", DEFAULT_PORT).to_i
     end
 
-    def transcribe(audio_path, language: "en", word_timestamps: true)
+    def engine_name
+      "whisper"
+    end
+
+    def transcribe(audio_path, language: "en", word_timestamps: true, suppress_hallucinations: true, **_options)
       raise ArgumentError, "Audio file not found: #{audio_path}" unless File.exist?(audio_path)
 
       uri = URI("http://#{@host}:#{@port}/inference")
@@ -26,8 +31,19 @@ module Transcription
         ["file", File.open(audio_path, "rb")],
         ["response_format", "verbose_json"],
         ["language", language],
-        ["word_timestamps", word_timestamps.to_s]
+        ["word_timestamps", word_timestamps.to_s],
+        ["temperature", DEFAULT_TEMPERATURE.to_s]
       ]
+
+      # Add hallucination suppression parameters
+      if suppress_hallucinations
+        form_data += [
+          ["no_speech_threshold", DEFAULT_NO_SPEECH_THRESHOLD.to_s],
+          ["compression_ratio_threshold", DEFAULT_COMPRESSION_RATIO_THRESHOLD.to_s],
+          ["condition_on_previous_text", "false"]  # Prevents repetition loops
+        ]
+      end
+
       request.set_form(form_data, "multipart/form-data")
 
       response = Net::HTTP.start(uri.hostname, uri.port, read_timeout: 3600, open_timeout: 30) do |http|
@@ -81,7 +97,8 @@ module Transcription
           start_time: seg["start"],
           end_time: seg["end"],
           text: seg["text"]&.strip,
-          confidence: seg["confidence"] || seg["avg_logprob"]&.then { |lp| Math.exp(lp) }
+          confidence: seg["confidence"] || seg["avg_logprob"]&.then { |lp| Math.exp(lp) },
+          speaker: nil  # Whisper doesn't provide speaker diarization
         )
       end
     end
@@ -96,16 +113,13 @@ module Transcription
             start_time: word["start"],
             end_time: word["end"],
             text: word["word"]&.strip,
-            confidence: word["probability"]
+            confidence: word["probability"],
+            speaker: nil  # Whisper doesn't provide speaker diarization
           )
         end
       end
 
       words
     end
-
-    Result = Struct.new(:text, :language, :duration, :segments, :words, keyword_init: true)
-    SegmentData = Struct.new(:start_time, :end_time, :text, :confidence, keyword_init: true)
-    WordData = Struct.new(:start_time, :end_time, :text, :confidence, keyword_init: true)
   end
 end

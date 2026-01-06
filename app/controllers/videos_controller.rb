@@ -1,8 +1,18 @@
 class VideosController < ApplicationController
   before_action :set_video, only: %i[show edit update destroy transcribe reprocess]
 
+  # Allowed sort columns and their SQL expressions
+  SORT_COLUMNS = {
+    "filename" => "videos.filename",
+    "project" => "projects.name",
+    "duration" => "videos.duration_seconds",
+    "state" => "videos.state",
+    "transcript" => "transcripts.state",
+    "created_at" => "videos.created_at"
+  }.freeze
+
   def index
-    @videos = Video.includes(:project, :transcript).order(created_at: :desc)
+    @videos = Video.includes(:project, :transcript)
 
     # Filter by project
     if params[:project_id].present?
@@ -36,6 +46,12 @@ class VideosController < ApplicationController
       @videos = @videos.where("filename ILIKE ?", "%#{params[:q]}%")
       @filter_query = params[:q]
     end
+
+    # Sorting
+    @sort_column = SORT_COLUMNS.key?(params[:sort]) ? params[:sort] : "created_at"
+    @sort_direction = %w[asc desc].include?(params[:direction]) ? params[:direction] : "desc"
+
+    @videos = apply_sorting(@videos, @sort_column, @sort_direction)
 
     # Counts for filter badges (before pagination)
     @total_count = Video.count
@@ -201,5 +217,19 @@ class VideosController < ApplicationController
 
   def video_params
     params.require(:video).permit(:project_id, :source_path, :filename, :proxy_path)
+  end
+
+  def apply_sorting(scope, column, direction)
+    sql_column = SORT_COLUMNS[column]
+    dir = direction == "asc" ? :asc : :desc
+
+    case column
+    when "project"
+      scope.joins(:project).order(Arel.sql("#{sql_column} #{dir}"))
+    when "transcript"
+      scope.left_joins(:transcript).order(Arel.sql("#{sql_column} #{dir} NULLS LAST"))
+    else
+      scope.order(Arel.sql("#{sql_column} #{dir}"))
+    end
   end
 end

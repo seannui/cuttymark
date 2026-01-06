@@ -108,17 +108,28 @@
   </div>
 </div>
 
+<%= turbo_frame_tag "videos_table" do %>
 <% if @videos.any? %>
   <div class="bg-white shadow-sm rounded-lg border border-gray-200 overflow-hidden">
     <div class="overflow-x-auto">
       <table class="min-w-full divide-y divide-gray-200">
         <thead class="bg-gray-50">
           <tr>
-            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Video</th>
-            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Project</th>
-            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Duration</th>
-            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">State</th>
-            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Transcript</th>
+            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <%= sortable_header("filename", "Video", @sort_column, @sort_direction) %>
+            </th>
+            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <%= sortable_header("project", "Project", @sort_column, @sort_direction) %>
+            </th>
+            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <%= sortable_header("duration", "Duration", @sort_column, @sort_direction) %>
+            </th>
+            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <%= sortable_header("state", "State", @sort_column, @sort_direction) %>
+            </th>
+            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <%= sortable_header("transcript", "Transcript", @sort_column, @sort_direction) %>
+            </th>
             <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
           </tr>
         </thead>
@@ -133,13 +144,13 @@
                     </svg>
                   </div>
                   <div class="ml-4">
-                    <%= link_to video.filename, video_path(video), class: "text-sm font-medium text-gray-900 hover:text-indigo-600" %>
+                    <%= link_to video.filename, video_path(video), class: "text-sm font-medium text-gray-900 hover:text-indigo-600", data: { turbo_frame: "_top" } %>
                     <div class="text-xs text-gray-500"><%= video.file_size_formatted %></div>
                   </div>
                 </div>
               </td>
               <td class="px-6 py-4 whitespace-nowrap">
-                <%= link_to video.project.name, project_path(video.project), class: "text-sm text-gray-900 hover:text-indigo-600" %>
+                <%= link_to video.project.name, project_path(video.project), class: "text-sm text-gray-900 hover:text-indigo-600", data: { turbo_frame: "_top" } %>
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                 <%= video.duration_formatted || "-" %>
@@ -201,4 +212,5 @@
       </div>
     <% end %>
   </div>
+<% end %>
 <% end %>

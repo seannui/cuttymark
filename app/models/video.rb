@@ -124,8 +124,9 @@ class Video < ApplicationRecord
 
   # Process video: transcribe and generate embeddings
   # Returns the completed transcript
-  def process!
-    transcript_result = Transcription::TranscriptionService.new.transcribe(self)
+  # @param engine [Symbol] :whisper or :gemini (defaults to TRANSCRIPTION_ENGINE env var)
+  def process!(engine: nil)
+    transcript_result = Transcription::TranscriptionService.new.transcribe(self, engine: engine)
     Embeddings::EmbeddingService.new.generate_for_transcript(transcript_result)
     transcript_result.complete! if transcript_result.may_complete?
     finish_transcription! if may_finish_transcription?
