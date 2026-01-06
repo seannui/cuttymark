@@ -5,7 +5,7 @@ reunion_video:
   format: "mp4"
   duration_seconds: 3600
   file_size: 1073741824
-  status: ready
+  state: ready
   created_at: <%= Time.current %>
   updated_at: <%= Time.current %>
 
@@ -16,6 +16,6 @@ interview_video:
   format: "mp4"
   duration_seconds: 1800
   file_size: 536870912
-  status: transcribed
+  state: transcribed
   created_at: <%= Time.current %>
   updated_at: <%= Time.current %>

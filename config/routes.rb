@@ -14,12 +14,18 @@ Rails.application.routes.draw do
   end
 
   # Search
-  resources :search_queries, path: "search"
+  resources :search_queries, path: "search" do
+    member do
+      post :rerun
+    end
+  end
 
   # Clips
   resources :clips do
     member do
       post :render_clip
+      get :stream
+      get :thumbnail
     end
     resource :export, only: [:create]
   end

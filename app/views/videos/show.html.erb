@@ -10,11 +10,8 @@
         Project: <%= link_to @video.project.name, project_path(@video.project), class: "text-indigo-600 hover:text-indigo-900" %>
       </p>
     </div>
-    <div class="flex space-x-3">
-      <%= link_to "Edit", edit_video_path(@video), class: "inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50" %>
-      <% unless @transcript&.completed? %>
-        <%= button_to "Transcribe", transcribe_video_path(@video), method: :post, class: "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700" %>
-      <% end %>
+    <div>
+      <%= render 'video_links', video: @video, context: :show %>
     </div>
   </div>
 </div>
@@ -107,14 +104,38 @@
   <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
     <h2 class="text-lg font-medium text-gray-900">Transcript</h2>
     <% if @transcript&.completed? %>
-      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-        Completed
-      </span>
+      <div class="flex items-center space-x-3">
+        <% if @transcript.engine.present? %>
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+            <%= @transcript.engine.capitalize %>
+          </span>
+        <% end %>
+        <% if @transcript.transcription_duration_formatted.present? %>
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+            <%= @transcript.transcription_duration_formatted %>
+          </span>
+        <% end %>
+        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+          Completed
+        </span>
+      </div>
     <% end %>
   </div>
 
   <% if @transcript %>
     <% if @transcript.completed? %>
+      <!-- Transcript Stats -->
+      <div class="px-6 py-3 bg-gray-50 border-b border-gray-200">
+        <div class="flex items-center space-x-6 text-sm text-gray-600">
+          <span><strong><%= @transcript.word_segments.count %></strong> words</span>
+          <span><strong><%= @transcript.sentence_segments.count %></strong> sentences</span>
+          <span><strong><%= @transcript.paragraph_segments.count %></strong> paragraphs</span>
+          <% if @transcript.transcription_started_at.present? %>
+            <span class="text-gray-400">|</span>
+            <span>Transcribed <%= time_ago_in_words(@transcript.transcription_completed_at || @transcript.updated_at) %> ago</span>
+          <% end %>
+        </div>
+      </div>
       <div class="p-6">
         <div class="prose prose-sm max-w-none">
           <%= simple_format(@transcript.raw_text) %>

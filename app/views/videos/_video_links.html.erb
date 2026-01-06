@@ -1,8 +1,15 @@
 <% links = [] %>
 
+<% unless local_assigns[:context] == :show %>
+  <% links << {
+    title: 'View',
+    url: video_path(video)
+  } %>
+<% end %>
+
 <% links << {
-  title: 'View',
-  url: video_path(video)
+  title: 'Edit',
+  url: edit_video_path(video)
 } %>
 
 <% links << {
@@ -16,6 +23,12 @@
     url: transcribe_video_path(video),
     options: { method: :post }
   } %>
+<% elsif video.transcript&.failed? %>
+  <% links << {
+    title: 'Transcribe',
+    url: reprocess_video_path(video),
+    options: { method: :post }
+  } %>
 <% elsif video.transcribed? || video.transcript&.completed? %>
   <% links << {
     title: 'Reprocess',
@@ -23,10 +36,5 @@
     options: { method: :post }
   } %>
 <% end %>
-
-<% links << {
-  title: 'Edit',
-  url: edit_video_path(video)
-} %>
 
 <%= render 'shared/actions_dropdown', links: links %>

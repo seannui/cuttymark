@@ -1,0 +1,25 @@
+<% links = [] %>
+
+<% links << {
+  title: 'View',
+  url: search_query_path(search_query)
+} %>
+
+<% links << {
+  title: 'Project',
+  url: project_path(search_query.project)
+} %>
+
+<% links << {
+  title: 'Re-run',
+  url: rerun_search_query_path(search_query),
+  options: { method: :post }
+} %>
+
+<% links << {
+  title: 'Delete',
+  url: search_query_path(search_query),
+  options: { method: :delete, data: { turbo_confirm: 'Delete this search query and all its matches?' } }
+} %>
+
+<%= render 'shared/actions_dropdown', links: links %>

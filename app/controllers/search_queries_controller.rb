@@ -1,5 +1,5 @@
 class SearchQueriesController < ApplicationController
-  before_action :set_search_query, only: %i[show destroy]
+  before_action :set_search_query, only: %i[show destroy rerun]
 
   def index
     @search_queries = SearchQuery.includes(:project, :matches).order(created_at: :desc)
@@ -46,6 +46,25 @@ class SearchQueriesController < ApplicationController
     project = @search_query.project
     @search_query.destroy
     redirect_to project_path(project), notice: "Search query was deleted."
+  end
+
+  def rerun
+    # Check for semantic search requirements
+    if @search_query.semantic?
+      ollama = Embeddings::OllamaClient.new
+      unless ollama.health_check
+        redirect_to @search_query, alert: "Ollama is not available. Please start it with: ollama serve"
+        return
+      end
+    end
+
+    # Clear existing matches and re-run the search
+    previous_count = @search_query.matches.count
+    @search_query.matches.destroy_all
+
+    # Re-run search in background job
+    SearchJob.perform_later(@search_query.id)
+    redirect_to @search_query, notice: "Re-running search (cleared #{previous_count} previous matches). New results will appear shortly."
   end
 
   private

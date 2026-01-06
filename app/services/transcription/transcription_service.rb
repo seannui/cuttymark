@@ -23,7 +23,7 @@ module Transcription
       # Create or find transcript record
       transcript = video.transcript || video.create_transcript!
       transcript.start_processing! if transcript.may_start_processing?
-      transcript.update!(engine: client.engine_name)
+      transcript.update!(engine: client.engine_name, transcription_started_at: Time.current)
 
       begin
         # Extract audio
@@ -44,6 +44,9 @@ module Transcription
         builder = SegmentBuilder.new(transcript)
         counts = builder.build_from_whisper_result(result)
         Rails.logger.info("Created segments: #{counts}")
+
+        # Record completion time
+        transcript.update!(transcription_completed_at: Time.current)
 
         # Clean up temporary files
         cleanup_audio(audio_path)

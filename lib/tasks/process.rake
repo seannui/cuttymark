@@ -1,10 +1,78 @@
-namespace :cuttymark do
+namespace :cm do
+  namespace :jobs do
+    desc "Show job queue status"
+    task status: :environment do
+      pending = SolidQueue::Job.where(finished_at: nil).count
+      completed = SolidQueue::Job.where.not(finished_at: nil).count
+      failed = SolidQueue::FailedExecution.count
+      scheduled = SolidQueue::ScheduledExecution.count
+      ready = SolidQueue::ReadyExecution.count
+      claimed = SolidQueue::ClaimedExecution.count
+
+      puts "Solid Queue Status"
+      puts "-" * 30
+      puts "  Ready:     #{ready}"
+      puts "  Claimed:   #{claimed}"
+      puts "  Scheduled: #{scheduled}"
+      puts "  Pending:   #{pending}"
+      puts "  Completed: #{completed}"
+      puts "  Failed:    #{failed}"
+      puts ""
+      puts "Web UI: http://localhost:3000/jobs"
+    end
+
+    desc "Clear all pending jobs (keeps completed)"
+    task clear: :environment do
+      ready = SolidQueue::ReadyExecution.count
+      claimed = SolidQueue::ClaimedExecution.count
+      scheduled = SolidQueue::ScheduledExecution.count
+
+      SolidQueue::ReadyExecution.destroy_all
+      SolidQueue::ClaimedExecution.destroy_all
+      SolidQueue::ScheduledExecution.destroy_all
+      SolidQueue::Job.where(finished_at: nil).destroy_all
+
+      puts "Cleared pending jobs:"
+      puts "  Ready: #{ready}"
+      puts "  Claimed: #{claimed}"
+      puts "  Scheduled: #{scheduled}"
+    end
+
+    desc "Clear all jobs (including completed)"
+    task clear_all: :environment do
+      count = SolidQueue::Job.count
+
+      SolidQueue::Job.destroy_all
+      SolidQueue::FailedExecution.destroy_all
+
+      puts "Cleared all #{count} jobs"
+    end
+
+    desc "Clear failed jobs"
+    task clear_failed: :environment do
+      count = SolidQueue::FailedExecution.count
+      SolidQueue::FailedExecution.destroy_all
+      puts "Cleared #{count} failed jobs"
+    end
+
+    desc "Retry all failed jobs"
+    task retry_failed: :environment do
+      count = 0
+      SolidQueue::FailedExecution.find_each do |failed|
+        failed.retry
+        count += 1
+      end
+      puts "Retried #{count} failed jobs"
+    end
+  end
+
+
   desc "Process a video file through the full pipeline: import, transcribe, embed"
   task :process, [:source_path, :project_name] => :environment do |_t, args|
     source_path = args[:source_path]
     project_name = args[:project_name] || "Default Project"
 
-    abort "Usage: rake cuttymark:process[/path/to/video.mp4]" if source_path.blank?
+    abort "Usage: rake cm:process[/path/to/video.mp4]" if source_path.blank?
     abort "File not found: #{source_path}" unless File.exist?(source_path)
 
     puts "=" * 60
@@ -15,15 +83,34 @@ namespace :cuttymark do
     check_dependencies!
 
     project = Project.find_or_create_by!(name: project_name) do |p|
-      p.description = "Created by cuttymark:process task"
+      p.description = "Created by cm:process task"
     end
 
-    process_video(source_path, project)
+    puts "Source: #{source_path}"
+    puts "Project: #{project.name}"
+    puts ""
+
+    start_time = Time.current
+    transcript = Video.import_and_process!(source_path, project: project)
+    elapsed = Time.current - start_time
+
+    video = transcript.video
+    puts "=" * 60
+    puts "Processing Complete"
+    puts "=" * 60
+    puts "  Video ID: #{video.id}"
+    puts "  Duration: #{format_duration(video.duration_seconds)}"
+    puts "  Words: #{transcript.word_segments.count}"
+    puts "  Sentences: #{transcript.sentence_segments.count}"
+    puts "  Elapsed: #{format_duration(elapsed)}"
+    puts "  Web UI: http://localhost:3000/videos/#{video.id}"
+    puts ""
   end
 
   desc "Process all unprocessed video files in storage/sources (includes retrying failed)"
   task :process_all, [:project_name] => :environment do |_t, args|
     project_name = args[:project_name] || "Default Project"
+    sources_dir = Rails.root.join("storage", "sources")
 
     puts "=" * 60
     puts "Cuttymark Batch Processing"
@@ -33,129 +120,136 @@ namespace :cuttymark do
     check_dependencies!
 
     project = Project.find_or_create_by!(name: project_name) do |p|
-      p.description = "Created by cuttymark:process_all task"
+      p.description = "Created by cm:process_all task"
     end
     puts "Project: #{project.name} (ID: #{project.id})"
     puts ""
 
-    sources_dir = Rails.root.join("storage", "sources")
     unless Dir.exist?(sources_dir)
       abort "Sources directory not found: #{sources_dir}"
     end
 
-    # Find videos that need processing:
-    # 1. New files not yet imported
-    # 2. Videos with error status
-    # 3. Videos with failed transcripts
-
-    # Get all imported videos
-    imported_videos = Video.all.index_by(&:source_path)
-    imported_paths = imported_videos.keys.to_set
-
-    # Find failed videos that need retry (use separate queries due to Rails OR limitations)
-    error_videos = Video.error.to_a
-    failed_transcript_videos = Video.joins(:transcript).merge(Transcript.failed).to_a
-    failed_videos = (error_videos + failed_transcript_videos).uniq(&:id)
-
-    extensions = Video::SUPPORTED_FORMATS + [Video::BRAW_FORMAT]
-    pattern = File.join(sources_dir, "**", "*.{#{extensions.join(',')}}")
-
-    all_files = Dir.glob(pattern, File::FNM_CASEFOLD).sort
-    new_files = all_files.reject { |path| imported_paths.include?(path) }
+    # Find all videos needing processing
+    work = Video.needing_processing(sources_dir: sources_dir)
+    new_files = work[:new_files]
+    pending_videos = work[:pending]
+    failed_videos = work[:failed]
 
     # Report what we found
     puts "Status:"
     puts "  New files to import: #{new_files.size}"
+    puts "  Pending transcription: #{pending_videos.size}"
     puts "  Failed videos to retry: #{failed_videos.size}"
     puts ""
 
-    if new_files.empty? && failed_videos.empty?
+    if new_files.empty? && pending_videos.empty? && failed_videos.empty?
       puts "Nothing to process!"
-      puts "  Already processed: #{imported_paths.size} videos"
+      puts "  Already processed: #{Video.count} videos"
       exit 0
     end
 
     # Show new files
     if new_files.any?
       puts "New file(s) to process:"
-      new_files.each_with_index do |path, i|
+      new_files.first(10).each_with_index do |path, i|
         relative = Pathname.new(path).relative_path_from(sources_dir)
         size = number_to_human_size(File.size(path))
         puts "  #{i + 1}. #{relative} (#{size})"
       end
+      puts "  ... and #{new_files.size - 10} more" if new_files.size > 10
+      puts ""
+    end
+
+    # Show pending videos (imported but never transcribed)
+    if pending_videos.any?
+      puts "Pending video(s) to transcribe:"
+      pending_videos.first(10).each_with_index do |video, i|
+        puts "  #{i + 1}. #{video.filename} (ID: #{video.id})"
+      end
+      puts "  ... and #{pending_videos.size - 10} more" if pending_videos.size > 10
       puts ""
     end
 
     # Show failed videos to retry
     if failed_videos.any?
       puts "Failed video(s) to retry:"
-      failed_videos.each_with_index do |video, i|
+      failed_videos.first(10).each_with_index do |video, i|
         error_msg = video.transcript&.error_message || "Unknown error"
         puts "  #{i + 1}. #{video.filename} (ID: #{video.id})"
         puts "     Previous error: #{error_msg.truncate(80)}"
       end
+      puts "  ... and #{failed_videos.size - 10} more" if failed_videos.size > 10
       puts ""
     end
 
     # Process everything
     successful = 0
-    failed = []
-    total = new_files.size + failed_videos.size
+    errors = []
+    total = new_files.size + pending_videos.size + failed_videos.size
     current = 0
 
     # Process new files
     new_files.each do |source_path|
       current += 1
       relative = Pathname.new(source_path).relative_path_from(sources_dir)
-      puts "=" * 60
-      puts "[#{current}/#{total}] Processing NEW: #{relative}"
-      puts "=" * 60
-      puts ""
+      puts "[#{current}/#{total}] NEW: #{relative}"
 
       begin
-        process_video(source_path, project)
+        start_time = Time.current
+        transcript = Video.import_and_process!(source_path, project: project)
+        elapsed = Time.current - start_time
+        puts "  -> OK (#{transcript.word_segments.count} words, #{format_duration(elapsed)})"
         successful += 1
       rescue StandardError => e
-        puts ""
-        puts "ERROR: #{e.message}"
-        puts ""
-        failed << { path: source_path, error: e.message }
+        puts "  -> ERROR: #{e.message.truncate(60)}"
+        errors << { path: source_path, error: e.message }
       end
+    end
 
-      puts ""
+    # Process pending videos (imported but never transcribed)
+    pending_videos.each do |video|
+      current += 1
+      puts "[#{current}/#{total}] PENDING: #{video.filename} (ID: #{video.id})"
+
+      begin
+        start_time = Time.current
+        transcript = video.process!
+        elapsed = Time.current - start_time
+        puts "  -> OK (#{transcript.word_segments.count} words, #{format_duration(elapsed)})"
+        successful += 1
+      rescue StandardError => e
+        puts "  -> ERROR: #{e.message.truncate(60)}"
+        errors << { path: video.source_path, error: e.message }
+      end
     end
 
     # Retry failed videos
     failed_videos.each do |video|
       current += 1
-      puts "=" * 60
-      puts "[#{current}/#{total}] RETRYING: #{video.filename} (ID: #{video.id})"
-      puts "=" * 60
-      puts ""
+      puts "[#{current}/#{total}] RETRY: #{video.filename} (ID: #{video.id})"
 
       begin
-        retry_video(video)
+        start_time = Time.current
+        transcript = video.retry!
+        elapsed = Time.current - start_time
+        puts "  -> OK (#{transcript.word_segments.count} words, #{format_duration(elapsed)})"
         successful += 1
       rescue StandardError => e
-        puts ""
-        puts "ERROR: #{e.message}"
-        puts ""
-        failed << { path: video.source_path, error: e.message }
+        puts "  -> ERROR: #{e.message.truncate(60)}"
+        errors << { path: video.source_path, error: e.message }
       end
-
-      puts ""
     end
 
     # Final summary
-    puts "=" * 60
-    puts "Batch Processing Complete"
-    puts "=" * 60
     puts ""
-    puts "Successful: #{successful}/#{total}"
+    puts "=" * 60
+    puts "Batch Processing Complete: #{successful}/#{total} successful"
+    puts "=" * 60
 
-    if failed.any?
-      puts "Failed: #{failed.size}"
-      failed.each do |f|
+    if errors.any?
+      puts ""
+      puts "Failed (#{errors.size}):"
+      errors.each do |f|
         puts "  - #{File.basename(f[:path])}: #{f[:error].truncate(60)}"
       end
     end
@@ -165,21 +259,30 @@ namespace :cuttymark do
   desc "Retry a specific failed video"
   task :retry, [:video_id] => :environment do |_t, args|
     video_id = args[:video_id]
-    abort "Usage: rake cuttymark:retry[VIDEO_ID]" if video_id.blank?
+    abort "Usage: rake cm:retry[VIDEO_ID]" if video_id.blank?
 
     check_dependencies!
 
     video = Video.find(video_id)
-    puts "Retrying transcription for: #{video.filename} (ID: #{video.id})"
-    puts ""
+    puts "Retrying: #{video.filename} (ID: #{video.id})"
 
-    retry_video(video)
+    start_time = Time.current
+    transcript = video.retry!
+    elapsed = Time.current - start_time
+
+    puts ""
+    puts "Retry Complete"
+    puts "  Words: #{transcript.word_segments.count}"
+    puts "  Sentences: #{transcript.sentence_segments.count}"
+    puts "  Elapsed: #{format_duration(elapsed)}"
+    puts "  Web UI: http://localhost:3000/videos/#{video.id}"
+    puts ""
   end
 
   desc "Clean hallucinations from a video transcript"
   task :clean_hallucinations, [:video_id] => :environment do |_t, args|
     video_id = args[:video_id]
-    abort "Usage: rake cuttymark:clean_hallucinations[VIDEO_ID]" if video_id.blank?
+    abort "Usage: rake cm:clean_hallucinations[VIDEO_ID]" if video_id.blank?
 
     video = Video.find(video_id)
     transcript = video.transcript
@@ -213,7 +316,7 @@ namespace :cuttymark do
   task :reprocess, [:video_id, :engine] => :environment do |_t, args|
     video_id = args[:video_id]
     engine = args[:engine]&.to_sym
-    abort "Usage: rake cuttymark:reprocess[VIDEO_ID] or rake cuttymark:reprocess[VIDEO_ID,gemini]" if video_id.blank?
+    abort "Usage: rake cm:reprocess[VIDEO_ID] or rake cm:reprocess[VIDEO_ID,gemini]" if video_id.blank?
 
     # Validate engine if provided
     if engine && !Transcription::ClientFactory::ENGINES.key?(engine)
@@ -223,33 +326,24 @@ namespace :cuttymark do
     check_dependencies!(engine: engine)
 
     video = Video.find(video_id)
-    engine_name = engine || Transcription::ClientFactory.default_engine
-    puts "=" * 60
+    engine_sym = engine || Transcription::ClientFactory.default_engine
+    client = Transcription::ClientFactory.create(engine_sym)
+    engine_display = client.respond_to?(:model_name) ? "#{engine_sym} (#{client.model_name})" : engine_sym.to_s
+
     puts "Reprocessing: #{video.filename} (ID: #{video.id})"
-    puts "Engine: #{engine_name}"
-    puts "=" * 60
+    puts "Engine: #{engine_display}"
     puts ""
 
-    # Reset video to fresh state
-    puts "Resetting video..."
-    result = video.reset_for_reprocessing!
-    puts "  Deleted transcript: #{result[:transcript_deleted]}"
-    puts "  Deleted segments: #{result[:segments_deleted]}"
-    puts "  Deleted audio files: #{result[:audio_files_deleted].join(', ')}" if result[:audio_files_deleted].any?
-    puts ""
-
-    # Process synchronously with specified engine
-    puts "Processing video with #{engine_name}..."
-    transcript = video.process!(engine: engine)
+    start_time = Time.current
+    transcript = video.retry!(engine: engine)
+    elapsed = Time.current - start_time
 
     puts ""
-    puts "=" * 60
     puts "Reprocessing Complete"
-    puts "=" * 60
     puts "  Engine: #{transcript.engine}"
     puts "  Words: #{transcript.word_segments.count}"
     puts "  Sentences: #{transcript.sentence_segments.count}"
-    puts "  Paragraphs: #{transcript.paragraph_segments.count}"
+    puts "  Elapsed: #{format_duration(elapsed)}"
     puts "  Web UI: http://localhost:3000/videos/#{video.id}"
     puts ""
   end
@@ -385,245 +479,12 @@ namespace :cuttymark do
     puts ""
   end
 
-  def process_video(source_path, project)
-    puts "Source: #{source_path}"
-    puts "Project: #{project.name}"
-    puts ""
-
-    # Step 1: Import
-    puts "-" * 60
-    puts "Step 1: Importing video"
-    puts "-" * 60
-
-    import_service = VideoProcessing::ImportService.new
-    video = import_service.import(source_path, project: project)
-    puts "Video imported: #{video.filename} (ID: #{video.id})"
-    puts "  Duration: #{format_duration(video.duration_seconds)}"
-    puts "  Format: #{video.format}"
-    puts "  Size: #{number_to_human_size(video.file_size)}"
-    puts ""
-
-    # Step 2: Transcribe
-    puts "-" * 60
-    puts "Step 2: Transcribing with Whisper"
-    puts "-" * 60
-
-    transcription_service = Transcription::TranscriptionService.new
-    start_time = Time.current
-
-    puts "Transcribing (this may take a while for long videos)..."
-    transcript = transcription_service.transcribe(video)
-
-    elapsed = Time.current - start_time
-    puts ""
-    puts "Transcription complete in #{format_duration(elapsed)}"
-    puts "  Words: #{transcript.segments.words.count}"
-    puts "  Sentences: #{transcript.segments.sentences.count}"
-    puts "  Paragraphs: #{transcript.segments.paragraphs.count}"
-    puts ""
-
-    # Step 3: Generate embeddings
-    puts "-" * 60
-    puts "Step 3: Generating embeddings with Ollama"
-    puts "-" * 60
-
-    ollama = Embeddings::OllamaClient.new
-    segments = transcript.sentence_segments.where(embedding: nil)
-    total = segments.count
-
-    puts "Processing #{total} sentence segments..."
-    start_time = Time.current
-
-    segments.find_each.with_index do |segment, index|
-      embedding = ollama.embed(segment.text)
-      segment.update!(embedding: embedding) if embedding
-
-      # Progress indicator
-      progress = ((index + 1).to_f / total * 100).round(1)
-      print "\r  Progress: #{index + 1}/#{total} (#{progress}%)"
-    end
-    puts ""
-
-    transcript.complete!
-    elapsed = Time.current - start_time
-    puts "Embeddings complete in #{format_duration(elapsed)}"
-    puts ""
-
-    # Summary
-    puts "-" * 60
-    puts "Video Complete: #{video.filename}"
-    puts "-" * 60
-    puts "  Video ID: #{video.id}"
-    puts "  Transcript ID: #{transcript.id}"
-    puts "  Words: #{transcript.segments.words.count}"
-    puts "  Sentences: #{transcript.segments.sentences.count}"
-    puts "  Web UI: http://localhost:3000/videos/#{video.id}"
-    puts ""
-  end
-
-  def retry_video(video)
-    puts "Source: #{video.source_path}"
-    puts "Previous state: #{video.aasm.current_state}"
-    if video.transcript
-      puts "Previous transcript state: #{video.transcript.aasm.current_state}"
-      puts "Previous error: #{video.transcript.error_message}" if video.transcript.error_message.present?
-    end
-    puts ""
-
-    # Reset video state
-    puts "-" * 60
-    puts "Step 1: Resetting video state"
-    puts "-" * 60
-
-    # Use the model method to reset
-    result = video.reset_for_reprocessing!
-    puts "Deleted previous transcript" if result[:transcript_deleted]
-    result[:audio_files_deleted].each { |f| puts "Deleted: #{f}" }
-    puts "Video state reset to: ready"
-    puts ""
-
-    # Step 2: Transcribe
-    puts "-" * 60
-    puts "Step 2: Transcribing with Whisper"
-    puts "-" * 60
-
-    transcription_service = Transcription::TranscriptionService.new
-    start_time = Time.current
-
-    puts "Transcribing (this may take a while for long videos)..."
-    transcript = transcription_service.transcribe(video)
-
-    elapsed = Time.current - start_time
-    puts ""
-    puts "Transcription complete in #{format_duration(elapsed)}"
-    puts "  Words: #{transcript.segments.words.count}"
-    puts "  Sentences: #{transcript.segments.sentences.count}"
-    puts "  Paragraphs: #{transcript.segments.paragraphs.count}"
-    puts ""
-
-    # Step 3: Generate embeddings
-    puts "-" * 60
-    puts "Step 3: Generating embeddings with Ollama"
-    puts "-" * 60
-
-    ollama = Embeddings::OllamaClient.new
-    segments = transcript.sentence_segments.where(embedding: nil)
-    total = segments.count
-
-    puts "Processing #{total} sentence segments..."
-    start_time = Time.current
-
-    segments.find_each.with_index do |segment, index|
-      embedding = ollama.embed(segment.text)
-      segment.update!(embedding: embedding) if embedding
-
-      # Progress indicator
-      progress = ((index + 1).to_f / total * 100).round(1)
-      print "\r  Progress: #{index + 1}/#{total} (#{progress}%)"
-    end
-    puts ""
-
-    transcript.complete!
-    elapsed = Time.current - start_time
-    puts "Embeddings complete in #{format_duration(elapsed)}"
-    puts ""
-
-    # Summary
-    puts "-" * 60
-    puts "Video Retry Complete: #{video.filename}"
-    puts "-" * 60
-    puts "  Video ID: #{video.id}"
-    puts "  Transcript ID: #{transcript.id}"
-    puts "  Words: #{transcript.segments.words.count}"
-    puts "  Sentences: #{transcript.segments.sentences.count}"
-    puts "  Web UI: http://localhost:3000/videos/#{video.id}"
-    puts ""
-  end
-
-  def reprocess_video(video)
-    puts "Source: #{video.source_path}"
-    puts "Current state: #{video.aasm.current_state}"
-    if video.transcript
-      puts "Current transcript: #{video.transcript.segments.count} segments"
-    end
-    puts ""
-
-    # Step 1: Clean up existing data
-    puts "-" * 60
-    puts "Step 1: Cleaning up existing data"
-    puts "-" * 60
-
-    # Use the model method to reset
-    result = video.reset_for_reprocessing!
-    puts "Deleted transcript with #{result[:segments_deleted]} segments" if result[:transcript_deleted]
-    result[:audio_files_deleted].each { |f| puts "Deleted: #{f}" }
-    puts "Video state reset to: ready"
-    puts ""
-
-    # Step 2: Transcribe with normalization
-    puts "-" * 60
-    puts "Step 2: Transcribing with Whisper (with audio normalization)"
-    puts "-" * 60
-
-    transcription_service = Transcription::TranscriptionService.new
-    start_time = Time.current
-
-    puts "Transcribing (this may take a while for long videos)..."
-    transcript = transcription_service.transcribe(video)
-
-    elapsed = Time.current - start_time
-    puts ""
-    puts "Transcription complete in #{format_duration(elapsed)}"
-    puts "  Words: #{transcript.segments.words.count}"
-    puts "  Sentences: #{transcript.segments.sentences.count}"
-    puts "  Paragraphs: #{transcript.segments.paragraphs.count}"
-    puts ""
-
-    # Step 3: Generate embeddings
-    puts "-" * 60
-    puts "Step 3: Generating embeddings with Ollama"
-    puts "-" * 60
-
-    ollama = Embeddings::OllamaClient.new
-    segments = transcript.sentence_segments.where(embedding: nil)
-    total = segments.count
-
-    puts "Processing #{total} sentence segments..."
-    start_time = Time.current
-
-    segments.find_each.with_index do |segment, index|
-      embedding = ollama.embed(segment.text)
-      segment.update!(embedding: embedding) if embedding
-
-      # Progress indicator
-      progress = ((index + 1).to_f / total * 100).round(1)
-      print "\r  Progress: #{index + 1}/#{total} (#{progress}%)"
-    end
-    puts ""
-
-    transcript.complete!
-    elapsed = Time.current - start_time
-    puts "Embeddings complete in #{format_duration(elapsed)}"
-    puts ""
-
-    # Summary
-    puts "-" * 60
-    puts "Reprocess Complete: #{video.filename}"
-    puts "-" * 60
-    puts "  Video ID: #{video.id}"
-    puts "  Transcript ID: #{transcript.id}"
-    puts "  Words: #{transcript.segments.words.count}"
-    puts "  Sentences: #{transcript.segments.sentences.count}"
-    puts "  Web UI: http://localhost:3000/videos/#{video.id}"
-    puts ""
-  end
-
   desc "Search a video transcript for a phrase"
   task :search, [:video_id, :query] => :environment do |_t, args|
     video_id = args[:video_id]
     query = args[:query]
 
-    abort "Usage: rake cuttymark:search[VIDEO_ID,'search query']" if video_id.blank? || query.blank?
+    abort "Usage: rake cm:search[VIDEO_ID,'search query']" if video_id.blank? || query.blank?
 
     video = Video.find(video_id)
     transcript = video.transcript

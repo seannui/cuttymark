@@ -98,6 +98,25 @@ module VideoProcessing
       output_path
     end
 
+    def generate_thumbnail(source_path, output_path, timestamp: 0)
+      raise FileNotFoundError, "Source file not found: #{source_path}" unless File.exist?(source_path)
+
+      FileUtils.mkdir_p(File.dirname(output_path))
+
+      cmd = [
+        @ffmpeg_path,
+        "-y",
+        "-ss", timestamp.to_s,
+        "-i", source_path,
+        "-vframes", "1",
+        "-q:v", "2",
+        output_path
+      ]
+
+      execute_command(cmd, "Thumbnail generation failed")
+      output_path
+    end
+
     def available?
       File.executable?(@ffmpeg_path) && File.executable?(@ffprobe_path)
     end
@@ -116,6 +135,28 @@ module VideoProcessing
 
       output = execute_command(cmd, "Duration extraction failed", capture: true)
       output.strip.to_f
+    end
+
+    # Extract a segment of audio from a source file
+    def extract_audio_segment(source_path, output_path, start_time:, duration:, sample_rate: 16000)
+      raise FileNotFoundError, "Source file not found: #{source_path}" unless File.exist?(source_path)
+
+      FileUtils.mkdir_p(File.dirname(output_path))
+
+      cmd = [
+        @ffmpeg_path,
+        "-y",
+        "-ss", start_time.to_s,
+        "-i", source_path,
+        "-t", duration.to_s,
+        "-acodec", "pcm_s16le",
+        "-ar", sample_rate.to_s,
+        "-ac", "1",
+        output_path
+      ]
+
+      execute_command(cmd, "Audio segment extraction failed")
+      output_path
     end
 
     # Get mean volume in dB (used to detect low-volume audio that may cause Whisper hallucination)

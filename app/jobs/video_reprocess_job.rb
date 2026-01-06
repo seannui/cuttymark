@@ -1,7 +1,7 @@
 class VideoReprocessJob < ApplicationJob
   queue_as :video_processing
 
-  retry_on Transcription::WhisperClient::ConnectionError, wait: 30.seconds, attempts: 3
+  retry_on Transcription::BaseClient::ConnectionError, wait: 30.seconds, attempts: 3
 
   def perform(video_id)
     video = Video.find(video_id)

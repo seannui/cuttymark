@@ -162,43 +162,41 @@ class VideosController < ApplicationController
 
   def transcribe
     if @video.braw? && @video.proxy_path.blank?
-      redirect_to @video, alert: ".braw files require a proxy. Please convert to MP4 first."
+      redirect_back fallback_location: @video, alert: ".braw files require a proxy. Please convert to MP4 first."
       return
     end
 
     unless File.exist?(@video.playable_path)
-      redirect_to @video, alert: "Video file not found at: #{@video.playable_path}"
+      redirect_back fallback_location: @video, alert: "Video file not found at: #{@video.playable_path}"
       return
     end
 
-    # Check if Whisper server is available
-    whisper = Transcription::WhisperClient.new
-    unless whisper.health_check
-      redirect_to @video, alert: "Whisper server is not available. Please start it first."
+    # Check if transcription engine is available
+    unless transcription_engine_available?
+      redirect_back fallback_location: @video, alert: transcription_engine_error_message
       return
     end
 
     @video.start_transcription!
     TranscriptionJob.perform_later(@video.id)
 
-    redirect_to @video, notice: "Transcription started. This may take a while for long videos."
+    redirect_back fallback_location: @video, notice: "Transcription started for #{@video.filename}."
   end
 
   def reprocess
     if @video.braw? && @video.proxy_path.blank?
-      redirect_to @video, alert: ".braw files require a proxy. Please convert to MP4 first."
+      redirect_back fallback_location: @video, alert: ".braw files require a proxy. Please convert to MP4 first."
       return
     end
 
     unless File.exist?(@video.playable_path)
-      redirect_to @video, alert: "Video file not found at: #{@video.playable_path}"
+      redirect_back fallback_location: @video, alert: "Video file not found at: #{@video.playable_path}"
       return
     end
 
-    # Check if Whisper server is available
-    whisper = Transcription::WhisperClient.new
-    unless whisper.health_check
-      redirect_to @video, alert: "Whisper server is not available. Please start it first."
+    # Check if transcription engine is available
+    unless transcription_engine_available?
+      redirect_back fallback_location: @video, alert: transcription_engine_error_message
       return
     end
 
@@ -206,7 +204,7 @@ class VideosController < ApplicationController
     @video.reset_for_reprocessing!
     @video.queue_for_reprocessing!
 
-    redirect_to @video, notice: "Reprocessing started. Previous transcript has been deleted."
+    redirect_back fallback_location: @video, notice: "Reprocessing started for #{@video.filename}."
   end
 
   private
@@ -230,6 +228,26 @@ class VideosController < ApplicationController
       scope.left_joins(:transcript).order(Arel.sql("#{sql_column} #{dir} NULLS LAST"))
     else
       scope.order(Arel.sql("#{sql_column} #{dir}"))
+    end
+  end
+
+  def transcription_engine_available?
+    engine = Transcription::ClientFactory.default_engine
+    client = Transcription::ClientFactory.create(engine)
+    client.health_check
+  rescue StandardError
+    false
+  end
+
+  def transcription_engine_error_message
+    engine = Transcription::ClientFactory.default_engine
+    case engine
+    when :whisper
+      "Whisper server is not available. Please start it first."
+    when :gemini
+      "Gemini API is not available. Check your GEMINI_API_KEY."
+    else
+      "Transcription engine (#{engine}) is not available."
     end
   end
 end

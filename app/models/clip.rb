@@ -35,6 +35,11 @@ class Clip < ApplicationRecord
 
   delegate :project, to: :video
 
+  def reset_for_rerender!
+    reset!
+    update!(export_path: nil, thumbnail_path: nil)
+  end
+
   def duration
     end_time - start_time
   end

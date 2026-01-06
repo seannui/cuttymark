@@ -1,5 +1,5 @@
 class ClipsController < ApplicationController
-  before_action :set_clip, only: %i[show edit update destroy render_clip]
+  before_action :set_clip, only: %i[show edit update destroy render_clip stream thumbnail]
 
   def index
     @clips = Clip.includes(:video, :match).order(created_at: :desc)
@@ -25,7 +25,13 @@ class ClipsController < ApplicationController
     @clip = Clip.new(clip_params)
 
     if @clip.save
-      redirect_to @clip, notice: "Clip was successfully created."
+      # Auto-render the clip if source file exists
+      if File.exist?(@clip.source_path)
+        ClipRenderJob.perform_later(@clip.id)
+        redirect_to @clip, notice: "Clip created and rendering started."
+      else
+        redirect_to @clip, notice: "Clip was successfully created."
+      end
     else
       @videos = Video.includes(:project).order(:filename)
       render :new, status: :unprocessable_entity
@@ -57,13 +63,37 @@ class ClipsController < ApplicationController
       return
     end
 
-    if @clip.rendered?
-      redirect_to @clip, alert: "Clip has already been rendered."
-      return
+    # Allow re-rendering by resetting the clip state
+    if @clip.rendered? || @clip.failed?
+      @clip.reset_for_rerender!
     end
 
     ClipRenderJob.perform_later(@clip.id)
     redirect_to @clip, notice: "Clip rendering started."
+  end
+
+  def stream
+    unless @clip.rendered? && @clip.export_path.present? && File.exist?(@clip.export_path)
+      head :not_found
+      return
+    end
+
+    send_file @clip.export_path,
+              type: "video/mp4",
+              disposition: "inline",
+              stream: true,
+              buffer_size: 16.kilobytes
+  end
+
+  def thumbnail
+    unless @clip.thumbnail_path.present? && File.exist?(@clip.thumbnail_path)
+      head :not_found
+      return
+    end
+
+    send_file @clip.thumbnail_path,
+              type: "image/png",
+              disposition: "inline"
   end
 
   private

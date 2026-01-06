@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_01_06_044237) do
+ActiveRecord::Schema[8.1].define(version: 2026_01_06_205308) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -23,6 +23,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_01_06_044237) do
     t.text "notes"
     t.float "start_time", null: false
     t.string "state", default: "defined", null: false
+    t.string "thumbnail_path"
     t.string "title"
     t.datetime "updated_at", null: false
     t.bigint "video_id", null: false
@@ -206,6 +207,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_01_06_044237) do
     t.text "error_message"
     t.text "raw_text"
     t.string "state", default: "pending", null: false
+    t.datetime "transcription_completed_at"
+    t.datetime "transcription_started_at"
     t.datetime "updated_at", null: false
     t.bigint "video_id", null: false
     t.index ["state"], name: "index_transcripts_on_state"

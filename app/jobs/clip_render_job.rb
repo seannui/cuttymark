@@ -11,9 +11,10 @@ class ClipRenderJob < ApplicationJob
     begin
       ffmpeg = VideoProcessing::FfmpegClient.new
 
-      # Generate output path
-      output_filename = generate_filename(clip)
-      output_path = Rails.root.join("storage", "exports", output_filename).to_s
+      # Generate output paths
+      base_filename = generate_base_filename(clip)
+      output_path = Rails.root.join("storage", "exports", "#{base_filename}.mp4").to_s
+      thumbnail_path = Rails.root.join("storage", "exports", "#{base_filename}.png").to_s
 
       # Render the clip
       ffmpeg.render_clip(
@@ -23,8 +24,15 @@ class ClipRenderJob < ApplicationJob
         end_time: clip.end_time
       )
 
+      # Generate thumbnail from beginning of clip
+      ffmpeg.generate_thumbnail(
+        clip.source_path,
+        thumbnail_path,
+        timestamp: clip.start_time
+      )
+
       clip.finish_render!
-      clip.update!(export_path: output_path)
+      clip.update!(export_path: output_path, thumbnail_path: thumbnail_path)
 
       Rails.logger.info("[ClipRenderJob] Completed render for clip: #{clip.id} -> #{output_path}")
     rescue VideoProcessing::FfmpegClient::Error => e
@@ -36,9 +44,9 @@ class ClipRenderJob < ApplicationJob
 
   private
 
-  def generate_filename(clip)
+  def generate_base_filename(clip)
     timestamp = Time.current.strftime("%Y%m%d_%H%M%S")
     title_slug = clip.title.present? ? clip.title.parameterize : "clip"
-    "#{title_slug}_#{clip.id}_#{timestamp}.mp4"
+    "#{title_slug}_#{clip.id}_#{timestamp}"
   end
 end

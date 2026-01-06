@@ -47,6 +47,9 @@ class Video < ApplicationRecord
 
   scope :pending_transcription, -> { ready.where.missing(:transcript) }
   scope :with_transcripts, -> { joins(:transcript).where(transcripts: { state: "completed" }) }
+  scope :failed, -> {
+    left_joins(:transcript).where("videos.state = ? OR transcripts.state = ?", "error", "failed")
+  }
 
   def braw?
     format&.downcase == BRAW_FORMAT
@@ -91,10 +94,10 @@ class Video < ApplicationRecord
   end
 
   # Reset video to fresh state for reprocessing
-  # Deletes transcript, cached audio files, and resets state
+  # Deletes transcript and optionally cached audio files (only if duration mismatch)
   # Returns hash with details of what was cleaned up
   def reset_for_reprocessing!
-    result = { transcript_deleted: false, segments_deleted: 0, audio_files_deleted: [] }
+    result = { transcript_deleted: false, segments_deleted: 0, audio_files_deleted: [], audio_files_kept: [] }
 
     # Delete transcript and segments
     if transcript
@@ -104,13 +107,19 @@ class Video < ApplicationRecord
       result[:transcript_deleted] = true
     end
 
-    # Delete cached audio files
+    # Check cached audio files - only delete if duration doesn't match source
     audio_cache_dir = Rails.root.join("storage", "audio_cache")
+    ffmpeg = VideoProcessing::FfmpegClient.new
+
     [
       audio_cache_dir.join("video_#{id}.wav"),
       audio_cache_dir.join("video_#{id}_normalized.wav")
     ].each do |path|
-      if File.exist?(path)
+      next unless File.exist?(path)
+
+      if audio_cache_valid?(path, ffmpeg)
+        result[:audio_files_kept] << File.basename(path)
+      else
         File.delete(path)
         result[:audio_files_deleted] << File.basename(path)
       end
@@ -120,6 +129,21 @@ class Video < ApplicationRecord
     reset!
 
     result
+  end
+
+  # Check if cached audio file duration matches source video (within tolerance)
+  def audio_cache_valid?(audio_path, ffmpeg = nil)
+    return false unless duration_seconds.present?
+    return false unless File.exist?(audio_path)
+
+    ffmpeg ||= VideoProcessing::FfmpegClient.new
+    audio_duration = ffmpeg.get_audio_duration(audio_path)
+
+    # Allow 1 second tolerance for rounding differences
+    (audio_duration - duration_seconds).abs < 1.0
+  rescue StandardError => e
+    Rails.logger.warn("Failed to validate audio cache: #{e.message}")
+    false
   end
 
   # Process video: transcribe and generate embeddings
@@ -133,6 +157,14 @@ class Video < ApplicationRecord
     transcript_result
   end
 
+  # Retry a failed video: reset state and re-process
+  # Returns the completed transcript
+  # @param engine [Symbol] :whisper or :gemini (defaults to TRANSCRIPTION_ENGINE env var)
+  def retry!(engine: nil)
+    reset_for_reprocessing!
+    process!(engine: engine)
+  end
+
   # Queue video for async reprocessing
   def queue_for_reprocessing!
     VideoReprocessJob.perform_later(id)
@@ -140,6 +172,41 @@ class Video < ApplicationRecord
 
   # Class methods for batch operations
   class << self
+    # Find all videos needing processing
+    # Returns hash with :new_files, :pending, :failed arrays
+    def needing_processing(sources_dir: nil)
+      sources_dir ||= Rails.root.join("storage", "sources")
+
+      # Get already imported paths
+      imported_paths = pluck(:source_path).to_set
+
+      # Find new files not yet imported
+      extensions = SUPPORTED_FORMATS + [BRAW_FORMAT]
+      pattern = File.join(sources_dir, "**", "*.{#{extensions.join(',')}}")
+      all_files = Dir.glob(pattern, File::FNM_CASEFOLD).sort
+      new_files = all_files.reject { |path| imported_paths.include?(path) }
+
+      # Find pending videos (ready but never transcribed)
+      pending = pending_transcription.order(:id).to_a
+
+      # Find failed videos (error state or failed transcript)
+      failed_videos = failed.distinct.order(:id).to_a
+
+      { new_files: new_files, pending: pending, failed: failed_videos }
+    end
+
+    # Import a video file and return the Video record
+    def import!(source_path, project:)
+      VideoProcessing::ImportService.new.import(source_path, project: project)
+    end
+
+    # Import and fully process a video file
+    # Returns the completed transcript
+    def import_and_process!(source_path, project:, engine: nil)
+      video = import!(source_path, project: project)
+      video.process!(engine: engine)
+    end
+
     def reset_all_for_reprocessing!(scope = all)
       results = { total: 0, segments_deleted: 0, audio_files_deleted: 0 }
 
