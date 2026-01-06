@@ -21,18 +21,21 @@ namespace :cm do
       puts "Web UI: http://localhost:3000/jobs"
     end
 
-    desc "Clear all pending jobs (keeps completed)"
+    desc "Clear all pending jobs (keeps completed and failed)"
     task clear: :environment do
       ready = SolidQueue::ReadyExecution.count
       claimed = SolidQueue::ClaimedExecution.count
       scheduled = SolidQueue::ScheduledExecution.count
 
+      # Get job IDs that have failed executions so we can exclude them
+      failed_job_ids = SolidQueue::FailedExecution.pluck(:job_id)
+
       SolidQueue::ReadyExecution.destroy_all
       SolidQueue::ClaimedExecution.destroy_all
       SolidQueue::ScheduledExecution.destroy_all
-      SolidQueue::Job.where(finished_at: nil).destroy_all
+      SolidQueue::Job.where(finished_at: nil).where.not(id: failed_job_ids).destroy_all
 
-      puts "Cleared pending jobs:"
+      puts "Cleared pending jobs (kept #{failed_job_ids.size} failed):"
       puts "  Ready: #{ready}"
       puts "  Claimed: #{claimed}"
       puts "  Scheduled: #{scheduled}"
@@ -117,8 +120,6 @@ namespace :cm do
     puts "=" * 60
     puts ""
 
-    check_dependencies!
-
     project = Project.find_or_create_by!(name: project_name) do |p|
       p.description = "Created by cm:process_all task"
     end
@@ -129,7 +130,7 @@ namespace :cm do
       abort "Sources directory not found: #{sources_dir}"
     end
 
-    # Find all videos needing processing
+    # Find all videos needing processing (for reporting)
     work = Video.needing_processing(sources_dir: sources_dir)
     new_files = work[:new_files]
     pending_videos = work[:pending]
@@ -148,111 +149,68 @@ namespace :cm do
       exit 0
     end
 
-    # Show new files
+    # Show preview of work
     if new_files.any?
-      puts "New file(s) to process:"
-      new_files.first(10).each_with_index do |path, i|
+      puts "New file(s) to import:"
+      new_files.first(5).each_with_index do |path, i|
         relative = Pathname.new(path).relative_path_from(sources_dir)
         size = number_to_human_size(File.size(path))
         puts "  #{i + 1}. #{relative} (#{size})"
       end
-      puts "  ... and #{new_files.size - 10} more" if new_files.size > 10
+      puts "  ... and #{new_files.size - 5} more" if new_files.size > 5
       puts ""
     end
 
-    # Show pending videos (imported but never transcribed)
     if pending_videos.any?
       puts "Pending video(s) to transcribe:"
-      pending_videos.first(10).each_with_index do |video, i|
+      pending_videos.first(5).each_with_index do |video, i|
         puts "  #{i + 1}. #{video.filename} (ID: #{video.id})"
       end
-      puts "  ... and #{pending_videos.size - 10} more" if pending_videos.size > 10
+      puts "  ... and #{pending_videos.size - 5} more" if pending_videos.size > 5
       puts ""
     end
 
-    # Show failed videos to retry
     if failed_videos.any?
       puts "Failed video(s) to retry:"
-      failed_videos.first(10).each_with_index do |video, i|
+      failed_videos.first(5).each_with_index do |video, i|
         error_msg = video.transcript&.error_message || "Unknown error"
         puts "  #{i + 1}. #{video.filename} (ID: #{video.id})"
-        puts "     Previous error: #{error_msg.truncate(80)}"
+        puts "     Error: #{error_msg.truncate(60)}"
       end
-      puts "  ... and #{failed_videos.size - 10} more" if failed_videos.size > 10
+      puts "  ... and #{failed_videos.size - 5} more" if failed_videos.size > 5
       puts ""
     end
 
-    # Process everything
-    successful = 0
-    errors = []
-    total = new_files.size + pending_videos.size + failed_videos.size
-    current = 0
+    # Queue all jobs
+    puts "-" * 60
+    puts "Queueing jobs..."
+    puts "-" * 60
+    puts ""
 
-    # Process new files
-    new_files.each do |source_path|
-      current += 1
-      relative = Pathname.new(source_path).relative_path_from(sources_dir)
-      puts "[#{current}/#{total}] NEW: #{relative}"
-
-      begin
-        start_time = Time.current
-        transcript = Video.import_and_process!(source_path, project: project)
-        elapsed = Time.current - start_time
-        puts "  -> OK (#{transcript.word_segments.count} words, #{format_duration(elapsed)})"
-        successful += 1
-      rescue StandardError => e
-        puts "  -> ERROR: #{e.message.truncate(60)}"
-        errors << { path: source_path, error: e.message }
+    counts = Video.queue_all_needing_processing!(project: project, sources_dir: sources_dir) do |type, item|
+      case type
+      when :new
+        relative = Pathname.new(item).relative_path_from(sources_dir)
+        puts "  Queued NEW: #{relative}"
+      when :pending
+        puts "  Queued PENDING: #{item.filename} (ID: #{item.id})"
+      when :failed
+        puts "  Queued RETRY: #{item.filename} (ID: #{item.id})"
       end
     end
 
-    # Process pending videos (imported but never transcribed)
-    pending_videos.each do |video|
-      current += 1
-      puts "[#{current}/#{total}] PENDING: #{video.filename} (ID: #{video.id})"
+    total = counts[:new_files] + counts[:pending] + counts[:failed]
 
-      begin
-        start_time = Time.current
-        transcript = video.process!
-        elapsed = Time.current - start_time
-        puts "  -> OK (#{transcript.word_segments.count} words, #{format_duration(elapsed)})"
-        successful += 1
-      rescue StandardError => e
-        puts "  -> ERROR: #{e.message.truncate(60)}"
-        errors << { path: video.source_path, error: e.message }
-      end
-    end
-
-    # Retry failed videos
-    failed_videos.each do |video|
-      current += 1
-      puts "[#{current}/#{total}] RETRY: #{video.filename} (ID: #{video.id})"
-
-      begin
-        start_time = Time.current
-        transcript = video.retry!
-        elapsed = Time.current - start_time
-        puts "  -> OK (#{transcript.word_segments.count} words, #{format_duration(elapsed)})"
-        successful += 1
-      rescue StandardError => e
-        puts "  -> ERROR: #{e.message.truncate(60)}"
-        errors << { path: video.source_path, error: e.message }
-      end
-    end
-
-    # Final summary
     puts ""
     puts "=" * 60
-    puts "Batch Processing Complete: #{successful}/#{total} successful"
+    puts "#{total} Jobs Queued"
     puts "=" * 60
-
-    if errors.any?
-      puts ""
-      puts "Failed (#{errors.size}):"
-      errors.each do |f|
-        puts "  - #{File.basename(f[:path])}: #{f[:error].truncate(60)}"
-      end
-    end
+    puts "  New imports: #{counts[:new_files]}"
+    puts "  Pending: #{counts[:pending]}"
+    puts "  Retries: #{counts[:failed]}"
+    puts ""
+    puts "Monitor progress: http://localhost:3000/jobs"
+    puts "Wait for completion: rails cm:wait_for_jobs"
     puts ""
   end
 

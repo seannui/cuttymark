@@ -230,5 +230,35 @@ class Video < ApplicationRecord
       end
       count
     end
+
+    # Queue jobs for all videos needing processing
+    # Returns hash with counts of queued jobs by type
+    def queue_all_needing_processing!(project:, sources_dir: nil)
+      work = needing_processing(sources_dir: sources_dir)
+      counts = { new_files: 0, pending: 0, failed: 0 }
+
+      # Queue new file imports
+      work[:new_files].each do |source_path|
+        VideoProcessJob.perform_later(source_path: source_path, project_id: project.id)
+        counts[:new_files] += 1
+        yield(:new, source_path) if block_given?
+      end
+
+      # Queue pending videos (ready but no transcript)
+      work[:pending].each do |video|
+        VideoProcessJob.perform_later(video_id: video.id)
+        counts[:pending] += 1
+        yield(:pending, video) if block_given?
+      end
+
+      # Queue failed videos
+      work[:failed].each do |video|
+        VideoProcessJob.perform_later(video_id: video.id)
+        counts[:failed] += 1
+        yield(:failed, video) if block_given?
+      end
+
+      counts
+    end
   end
 end

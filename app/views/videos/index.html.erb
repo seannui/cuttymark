@@ -89,7 +89,7 @@
 <% end %>
 
 <!-- Stats Cards -->
-<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+<div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
   <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
     <div class="text-sm font-medium text-gray-500">Total</div>
     <div class="text-2xl font-semibold text-gray-900"><%= @total_count %></div>
@@ -97,6 +97,10 @@
   <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
     <div class="text-sm font-medium text-gray-500">Ready</div>
     <div class="text-2xl font-semibold text-green-600"><%= @state_counts["ready"] || 0 %></div>
+  </div>
+  <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+    <div class="text-sm font-medium text-gray-500">Transcribing</div>
+    <div class="text-2xl font-semibold text-yellow-600"><%= @state_counts["transcribing"] || 0 %></div>
   </div>
   <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
     <div class="text-sm font-medium text-gray-500">Transcribed</div>

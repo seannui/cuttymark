@@ -117,13 +117,15 @@ module Transcription
     def transcribe_single(audio_path)
       file_size = File.size(audio_path)
 
+      # Always use compact mode to avoid MAX_TOKENS errors
+      # Word timings are generated from segments afterward
       response = if file_size > FILE_SIZE_THRESHOLD
-                   transcribe_with_file_api(audio_path, compact: false)
+                   transcribe_with_file_api(audio_path, compact: true)
                  else
-                   transcribe_inline(audio_path, compact: false)
+                   transcribe_inline(audio_path, compact: true)
                  end
 
-      parse_response(response, compact: false)
+      parse_response(response, compact: true)
     end
 
     def transcribe_chunked(audio_path, total_duration)
