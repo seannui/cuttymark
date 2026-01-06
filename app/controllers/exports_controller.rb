@@ -30,7 +30,8 @@ class ExportsController < ApplicationController
       output_path = export_service.export(@clip, format: format, name: @clip.title)
 
       if format.to_s.start_with?("mp4", "prores")
-        @clip.update!(export_path: output_path, status: :rendered)
+        @clip.finish_render!
+        @clip.update!(export_path: output_path)
         redirect_to @clip, notice: "Clip exported successfully to: #{File.basename(output_path)}"
       else
         send_file output_path,

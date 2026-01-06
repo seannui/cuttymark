@@ -1,0 +1,48 @@
+<% if links.present? && links.any? %>
+  <div class="relative inline-flex text-left" data-controller="dropdown">
+    <% first_link = links.first %>
+    <% first_opts = (first_link[:options] || {}).dup %>
+    <% first_class = "text-indigo-600 hover:text-indigo-900 text-sm font-medium" %>
+
+    <% if first_opts[:method] && first_opts[:method] != :get %>
+      <%= button_to first_link[:title], first_link[:url], first_opts.merge(class: first_class) %>
+    <% else %>
+      <%= link_to first_link[:title], first_link[:url], first_opts.merge(class: first_class) %>
+    <% end %>
+
+    <% if links.size > 1 %>
+      <button type="button"
+              class="ml-1 text-indigo-600 hover:text-indigo-900"
+              data-action="click->dropdown#toggle"
+              data-dropdown-target="button"
+              aria-expanded="false"
+              aria-haspopup="true">
+        <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+          <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+        </svg>
+        <span class="sr-only">More actions</span>
+      </button>
+
+      <div class="hidden absolute right-0 z-10 mt-6 w-40 origin-top-right rounded-md bg-white shadow-lg ring-1 ring-black/5 focus:outline-none"
+           data-dropdown-target="menu"
+           role="menu"
+           aria-orientation="vertical"
+           tabindex="-1">
+        <div class="py-1" role="none">
+          <% links[1..].each do |link| %>
+            <% opts = (link[:options] || {}).merge(
+                 class: "block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 w-full text-left",
+                 role: "menuitem",
+                 tabindex: "-1"
+               ) %>
+            <% if opts[:method] && opts[:method] != :get %>
+              <%= button_to link[:title], link[:url], opts %>
+            <% else %>
+              <%= link_to link[:title], link[:url], opts %>
+            <% end %>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+  </div>
+<% end %>

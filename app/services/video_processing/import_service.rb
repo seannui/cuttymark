@@ -29,7 +29,7 @@ module VideoProcessing
         format: format,
         duration_seconds: metadata.duration,
         file_size: metadata.file_size,
-        status: determine_initial_status(format),
+        state: determine_initial_state(format),
         metadata: build_metadata_hash(metadata)
       )
 
@@ -66,7 +66,7 @@ module VideoProcessing
 
     private
 
-    def determine_initial_status(format)
+    def determine_initial_state(format)
       if format == ::Video::BRAW_FORMAT
         "pending" # Needs proxy conversion
       else

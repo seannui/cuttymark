@@ -83,7 +83,8 @@ module Export
         export_with_reencode(clip, output_path, preset_config)
       end
 
-      clip.update!(export_path: output_path, status: :rendered)
+      clip.finish_render!
+      clip.update!(export_path: output_path)
       output_path
     end
 

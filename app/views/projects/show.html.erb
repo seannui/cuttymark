@@ -116,14 +116,14 @@
                 <%= video.duration_formatted || "-" %>
               </td>
               <td class="px-6 py-4 whitespace-nowrap">
-                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium <%= video.status == 'ready' ? 'bg-green-100 text-green-800' : video.status == 'error' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800' %>">
-                  <%= video.status.titleize %>
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium <%= video.ready? ? 'bg-green-100 text-green-800' : video.error? ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800' %>">
+                  <%= video.aasm.current_state.to_s.titleize %>
                 </span>
               </td>
               <td class="px-6 py-4 whitespace-nowrap">
                 <% if video.transcript %>
-                  <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium <%= video.transcript.status == 'completed' ? 'bg-green-100 text-green-800' : video.transcript.status == 'failed' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800' %>">
-                    <%= video.transcript.status.titleize %>
+                  <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium <%= video.transcript.completed? ? 'bg-green-100 text-green-800' : video.transcript.failed? ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800' %>">
+                    <%= video.transcript.aasm.current_state.to_s.titleize %>
                   </span>
                 <% else %>
                   <span class="text-sm text-gray-400">Not started</span>

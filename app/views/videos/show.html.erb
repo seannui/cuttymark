@@ -58,7 +58,7 @@
       </div>
       <div class="ml-4">
         <p class="text-sm font-medium text-gray-500">Status</p>
-        <p class="text-xl font-semibold text-gray-900"><%= @video.status.titleize %></p>
+        <p class="text-xl font-semibold text-gray-900"><%= @video.aasm.current_state.to_s.titleize %></p>
       </div>
     </div>
   </div>
@@ -176,7 +176,7 @@
               </td>
               <td class="px-6 py-4 whitespace-nowrap">
                 <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium <%= clip.rendered? ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800' %>">
-                  <%= clip.status.titleize %>
+                  <%= clip.aasm.current_state.to_s.titleize %>
                 </span>
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">

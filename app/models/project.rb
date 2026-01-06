@@ -11,6 +11,6 @@ class Project < ApplicationRecord
   end
 
   def transcribed_videos_count
-    videos.joins(:transcript).where(transcripts: { status: "completed" }).count
+    videos.joins(:transcript).where(transcripts: { state: "completed" }).count
   end
 end

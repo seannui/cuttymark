@@ -1,22 +1,37 @@
 class Clip < ApplicationRecord
+  include AASM
+
   belongs_to :video
   belongs_to :match, optional: true
 
   validates :start_time, presence: true
   validates :end_time, presence: true
-  validates :status, presence: true
   validate :end_time_after_start_time
 
-  enum :status, {
-    defined: "defined",
-    rendering: "rendering",
-    rendered: "rendered",
-    failed: "failed"
-  }, default: :defined
+  aasm column: :state do
+    state :defined, initial: true
+    state :rendering
+    state :rendered
+    state :failed
+
+    event :start_render do
+      transitions from: :defined, to: :rendering
+    end
+
+    event :finish_render do
+      transitions from: :rendering, to: :rendered
+    end
+
+    event :fail do
+      transitions from: [:defined, :rendering], to: :failed
+    end
+
+    event :reset do
+      transitions from: [:rendered, :failed], to: :defined
+    end
+  end
 
   scope :ordered, -> { order(:start_time) }
-  scope :rendered, -> { where(status: "rendered") }
-  scope :pending, -> { where(status: "defined") }
 
   delegate :project, to: :video
 
@@ -42,10 +57,6 @@ class Clip < ApplicationRecord
 
   def display_title
     title.presence || "Clip #{id} (#{time_range_formatted})"
-  end
-
-  def rendered?
-    status == "rendered" && export_path.present?
   end
 
   def source_path

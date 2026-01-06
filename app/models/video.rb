@@ -1,4 +1,6 @@
 class Video < ApplicationRecord
+  include AASM
+
   belongs_to :project
   has_one :transcript, dependent: :destroy
   has_many :segments, through: :transcript
@@ -6,22 +8,45 @@ class Video < ApplicationRecord
 
   validates :source_path, presence: true, uniqueness: true
   validates :filename, presence: true
-  validates :status, presence: true
-
-  enum :status, {
-    pending: "pending",
-    importing: "importing",
-    ready: "ready",
-    transcribing: "transcribing",
-    transcribed: "transcribed",
-    error: "error"
-  }, default: :pending
 
   SUPPORTED_FORMATS = %w[mp4 mov mkv m4v avi webm].freeze
   BRAW_FORMAT = "braw"
 
-  scope :pending_transcription, -> { where(status: %w[ready]).where.missing(:transcript) }
-  scope :with_transcripts, -> { joins(:transcript).where(transcripts: { status: "completed" }) }
+  aasm column: :state do
+    state :pending, initial: true
+    state :importing
+    state :ready
+    state :transcribing
+    state :transcribed
+    state :error
+
+    event :start_import do
+      transitions from: :pending, to: :importing
+    end
+
+    event :finish_import do
+      transitions from: :importing, to: :ready
+    end
+
+    event :start_transcription do
+      transitions from: :ready, to: :transcribing
+    end
+
+    event :finish_transcription do
+      transitions from: :transcribing, to: :transcribed
+    end
+
+    event :fail do
+      transitions from: [:importing, :transcribing], to: :error
+    end
+
+    event :reset do
+      transitions from: [:pending, :ready, :transcribing, :transcribed, :error], to: :ready
+    end
+  end
+
+  scope :pending_transcription, -> { ready.where.missing(:transcript) }
+  scope :with_transcripts, -> { joins(:transcript).where(transcripts: { state: "completed" }) }
 
   def braw?
     format&.downcase == BRAW_FORMAT
@@ -62,6 +87,80 @@ class Video < ApplicationRecord
       Kernel.format("%.1f MB", file_size / 1.megabyte.to_f)
     else
       Kernel.format("%.0f KB", file_size / 1.kilobyte.to_f)
+    end
+  end
+
+  # Reset video to fresh state for reprocessing
+  # Deletes transcript, cached audio files, and resets state
+  # Returns hash with details of what was cleaned up
+  def reset_for_reprocessing!
+    result = { transcript_deleted: false, segments_deleted: 0, audio_files_deleted: [] }
+
+    # Delete transcript and segments
+    if transcript
+      result[:segments_deleted] = transcript.segments.count
+      transcript.destroy!
+      reload  # Clear cached association
+      result[:transcript_deleted] = true
+    end
+
+    # Delete cached audio files
+    audio_cache_dir = Rails.root.join("storage", "audio_cache")
+    [
+      audio_cache_dir.join("video_#{id}.wav"),
+      audio_cache_dir.join("video_#{id}_normalized.wav")
+    ].each do |path|
+      if File.exist?(path)
+        File.delete(path)
+        result[:audio_files_deleted] << File.basename(path)
+      end
+    end
+
+    # Reset state using AASM event
+    reset!
+
+    result
+  end
+
+  # Process video: transcribe and generate embeddings
+  # Returns the completed transcript
+  def process!
+    transcript_result = Transcription::TranscriptionService.new.transcribe(self)
+    Embeddings::EmbeddingService.new.generate_for_transcript(transcript_result)
+    transcript_result.complete! if transcript_result.may_complete?
+    finish_transcription! if may_finish_transcription?
+    transcript_result
+  end
+
+  # Queue video for async reprocessing
+  def queue_for_reprocessing!
+    VideoReprocessJob.perform_later(id)
+  end
+
+  # Class methods for batch operations
+  class << self
+    def reset_all_for_reprocessing!(scope = all)
+      results = { total: 0, segments_deleted: 0, audio_files_deleted: 0 }
+
+      scope.find_each do |video|
+        result = video.reset_for_reprocessing!
+        results[:total] += 1
+        results[:segments_deleted] += result[:segments_deleted]
+        results[:audio_files_deleted] += result[:audio_files_deleted].size
+        yield(video, result) if block_given?
+      end
+
+      results
+    end
+
+    def queue_all_for_reprocessing!(scope = all)
+      count = 0
+      scope.find_each do |video|
+        video.queue_for_reprocessing!
+        count += 1
+        yield(video) if block_given?
+      end
+      count
     end
   end
 end

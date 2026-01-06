@@ -2,39 +2,44 @@ module Transcription
   class TranscriptionService
     class Error < StandardError; end
 
+    # Audio with mean volume below this threshold will be normalized
+    LOW_VOLUME_THRESHOLD_DB = -30
+
     def initialize(whisper_client: nil, ffmpeg_client: nil)
       @whisper = whisper_client || WhisperClient.new
       @ffmpeg = ffmpeg_client || VideoProcessing::FfmpegClient.new
     end
 
-    def transcribe(video)
+    def transcribe(video, normalize: :auto)
       Rails.logger.info("Starting transcription for video: #{video.filename} (#{video.id})")
+
+      # Transition video to transcribing state
+      video.start_transcription! if video.may_start_transcription?
 
       # Create or find transcript record
       transcript = video.transcript || video.create_transcript!
-      transcript.update!(status: :processing, engine: "whisper")
+      transcript.start_processing! if transcript.may_start_processing?
+      transcript.update!(engine: "whisper")
 
       begin
         # Extract audio
         audio_path = extract_audio(video)
         Rails.logger.info("Audio extracted to: #{audio_path}")
 
+        # Check if normalization is needed
+        audio_path = maybe_normalize_audio(audio_path, normalize)
+
         # Transcribe with Whisper
-        transcript.update!(status: :processing)
         result = @whisper.transcribe(audio_path, word_timestamps: true)
         Rails.logger.info("Whisper returned #{result.words.size} words")
 
         # Build segments
-        transcript.update!(status: :segmenting)
+        transcript.start_segmenting! if transcript.may_start_segmenting?
         builder = SegmentBuilder.new(transcript)
         counts = builder.build_from_whisper_result(result)
         Rails.logger.info("Created segments: #{counts}")
 
-        # Mark complete
-        transcript.update!(status: :completed)
-        video.update!(status: :transcribed)
-
-        # Clean up audio file
+        # Clean up temporary files
         cleanup_audio(audio_path)
 
         transcript
@@ -55,6 +60,35 @@ module Transcription
     end
 
     private
+
+    # Normalize audio if needed based on volume analysis
+    def maybe_normalize_audio(audio_path, normalize_option)
+      case normalize_option
+      when true
+        normalize_audio(audio_path)
+      when false
+        audio_path
+      when :auto
+        mean_volume = @ffmpeg.get_mean_volume(audio_path)
+        Rails.logger.info("Audio mean volume: #{mean_volume.round(1)} dB")
+
+        if mean_volume < LOW_VOLUME_THRESHOLD_DB
+          Rails.logger.info("Low volume detected (#{mean_volume.round(1)} dB < #{LOW_VOLUME_THRESHOLD_DB} dB), normalizing...")
+          normalize_audio(audio_path)
+        else
+          audio_path
+        end
+      else
+        audio_path
+      end
+    end
+
+    def normalize_audio(audio_path)
+      normalized_path = audio_path.sub(/\.wav$/, "_normalized.wav")
+      @ffmpeg.normalize_audio(audio_path, output_path: normalized_path)
+      Rails.logger.info("Audio normalized to: #{normalized_path}")
+      normalized_path
+    end
 
     def extract_audio(video)
       source_path = video.playable_path
@@ -92,8 +126,9 @@ module Transcription
 
     def handle_error(transcript, video, message)
       Rails.logger.error(message)
-      transcript.update!(status: :failed, error_message: message)
-      video.update!(status: :error)
+      transcript.fail! if transcript.may_fail?
+      transcript.update!(error_message: message)
+      video.fail! if video.may_fail?
     end
   end
 end

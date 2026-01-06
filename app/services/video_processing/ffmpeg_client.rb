@@ -8,6 +8,9 @@ module VideoProcessing
 
     SUPPORTED_AUDIO_FORMATS = %w[wav mp3 m4a aac].freeze
 
+    # Maximum chunk duration in seconds (10 minutes is safe for GPU memory)
+    MAX_CHUNK_DURATION = 600
+
     def initialize
       @ffmpeg_path = find_executable("ffmpeg")
       @ffprobe_path = find_executable("ffprobe")
@@ -99,6 +102,183 @@ module VideoProcessing
       File.executable?(@ffmpeg_path) && File.executable?(@ffprobe_path)
     end
 
+    # Get audio duration in seconds
+    def get_audio_duration(audio_path)
+      raise FileNotFoundError, "Audio file not found: #{audio_path}" unless File.exist?(audio_path)
+
+      cmd = [
+        @ffprobe_path,
+        "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        audio_path
+      ]
+
+      output = execute_command(cmd, "Duration extraction failed", capture: true)
+      output.strip.to_f
+    end
+
+    # Get mean volume in dB (used to detect low-volume audio that may cause Whisper hallucination)
+    def get_mean_volume(audio_path)
+      raise FileNotFoundError, "Audio file not found: #{audio_path}" unless File.exist?(audio_path)
+
+      cmd = [
+        @ffmpeg_path,
+        "-i", audio_path,
+        "-af", "volumedetect",
+        "-f", "null",
+        "-"
+      ]
+
+      # volumedetect outputs to stderr
+      _output, error, status = Open3.capture3(*cmd)
+      unless status.success?
+        Rails.logger.warn("Volume detection failed, assuming normal volume")
+        return 0.0
+      end
+
+      # Parse mean_volume from output like: [Parsed_volumedetect_0 ...] mean_volume: -36.3 dB
+      if error =~ /mean_volume:\s*([-\d.]+)\s*dB/
+        ::Regexp.last_match(1).to_f
+      else
+        Rails.logger.warn("Could not parse mean volume from ffmpeg output")
+        0.0
+      end
+    end
+
+    # Check if audio needs chunking based on duration
+    def needs_chunking?(audio_path, max_duration: MAX_CHUNK_DURATION)
+      get_audio_duration(audio_path) > max_duration
+    end
+
+    # Split audio file into chunks with overlap for better transcription continuity
+    def split_audio_into_chunks(audio_path, output_dir:, chunk_duration: MAX_CHUNK_DURATION, overlap: 2)
+      raise FileNotFoundError, "Audio file not found: #{audio_path}" unless File.exist?(audio_path)
+
+      FileUtils.mkdir_p(output_dir)
+      total_duration = get_audio_duration(audio_path)
+      chunks = []
+      chunk_index = 0
+      current_start = 0.0
+
+      while current_start < total_duration
+        chunk_path = File.join(output_dir, "chunk_#{chunk_index.to_s.rjust(4, '0')}.wav")
+        actual_duration = [chunk_duration, total_duration - current_start].min
+
+        cmd = [
+          @ffmpeg_path,
+          "-y",
+          "-ss", current_start.to_s,
+          "-i", audio_path,
+          "-t", actual_duration.to_s,
+          "-acodec", "pcm_s16le",
+          "-ar", "16000",
+          "-ac", "1",
+          chunk_path
+        ]
+
+        execute_command(cmd, "Chunk extraction failed for chunk #{chunk_index}")
+
+        chunks << AudioChunk.new(
+          path: chunk_path,
+          index: chunk_index,
+          start_time: current_start,
+          duration: actual_duration
+        )
+
+        chunk_index += 1
+        # Move forward by chunk_duration minus overlap (overlap helps with word boundaries)
+        current_start += (chunk_duration - overlap)
+      end
+
+      Rails.logger.info("Split audio into #{chunks.size} chunks")
+      chunks
+    end
+
+    # Validate audio file is suitable for Whisper processing
+    def validate_audio(audio_path)
+      raise FileNotFoundError, "Audio file not found: #{audio_path}" unless File.exist?(audio_path)
+
+      errors = []
+      metadata = get_audio_metadata(audio_path)
+
+      # Check sample rate (Whisper expects 16kHz)
+      if metadata[:sample_rate] && metadata[:sample_rate] != 16000
+        errors << "Sample rate is #{metadata[:sample_rate]}Hz, expected 16000Hz"
+      end
+
+      # Check channels (Whisper expects mono)
+      if metadata[:channels] && metadata[:channels] != 1
+        errors << "Audio has #{metadata[:channels]} channels, expected mono (1)"
+      end
+
+      # Check codec
+      if metadata[:codec_name] && metadata[:codec_name] != "pcm_s16le"
+        errors << "Codec is #{metadata[:codec_name]}, expected pcm_s16le"
+      end
+
+      # Check duration is not zero
+      if metadata[:duration] && metadata[:duration] <= 0
+        errors << "Audio duration is zero or negative"
+      end
+
+      ValidationResult.new(
+        valid: errors.empty?,
+        errors: errors,
+        metadata: metadata
+      )
+    end
+
+    # Re-encode audio to Whisper-compatible format with optional normalization
+    def normalize_audio(input_path, output_path: nil, normalize_volume: true)
+      raise FileNotFoundError, "Audio file not found: #{input_path}" unless File.exist?(input_path)
+
+      output_path ||= input_path.sub(/\.[^.]+$/, "_normalized.wav")
+      FileUtils.mkdir_p(File.dirname(output_path))
+
+      # Build filter chain
+      filters = ["aresample=async=1000"]
+      filters << "loudnorm=I=-16:TP=-1.5:LRA=11" if normalize_volume
+      filters << "lowpass=f=8000"  # Anti-aliasing for 16kHz
+
+      cmd = [
+        @ffmpeg_path,
+        "-y",
+        "-i", input_path,
+        "-ar", "16000",
+        "-ac", "1",
+        "-acodec", "pcm_s16le",
+        "-af", filters.join(","),
+        output_path
+      ]
+
+      execute_command(cmd, "Audio normalization failed")
+      output_path
+    end
+
+    def get_audio_metadata(audio_path)
+      cmd = [
+        @ffprobe_path,
+        "-v", "quiet",
+        "-print_format", "json",
+        "-show_streams",
+        "-select_streams", "a:0",
+        audio_path
+      ]
+
+      output = execute_command(cmd, "Audio metadata extraction failed", capture: true)
+      data = JSON.parse(output)
+      stream = data["streams"]&.first || {}
+
+      {
+        codec_name: stream["codec_name"],
+        sample_rate: stream["sample_rate"]&.to_i,
+        channels: stream["channels"],
+        duration: stream["duration"]&.to_f,
+        bit_rate: stream["bit_rate"]&.to_i
+      }
+    end
+
     def version
       output = `#{@ffmpeg_path} -version 2>&1`
       output.lines.first&.strip
@@ -175,5 +355,19 @@ module VideoProcessing
       :audio_codec, :audio_sample_rate, :audio_channels,
       keyword_init: true
     )
+
+    AudioChunk = Struct.new(
+      :path, :index, :start_time, :duration,
+      keyword_init: true
+    )
+
+    ValidationResult = Struct.new(
+      :valid, :errors, :metadata,
+      keyword_init: true
+    ) do
+      def valid?
+        valid
+      end
+    end
   end
 end

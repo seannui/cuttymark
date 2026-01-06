@@ -1,4 +1,7 @@
 Rails.application.routes.draw do
+  # Mission Control for job monitoring
+  mount MissionControl::Jobs::Engine, at: "/jobs"
+
   # Projects
   resources :projects
 
@@ -6,6 +9,7 @@ Rails.application.routes.draw do
   resources :videos do
     member do
       post :transcribe
+      post :reprocess
     end
   end
 

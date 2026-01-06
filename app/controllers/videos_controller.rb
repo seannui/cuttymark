@@ -1,8 +1,49 @@
 class VideosController < ApplicationController
-  before_action :set_video, only: %i[show edit update destroy transcribe]
+  before_action :set_video, only: %i[show edit update destroy transcribe reprocess]
 
   def index
     @videos = Video.includes(:project, :transcript).order(created_at: :desc)
+
+    # Filter by project
+    if params[:project_id].present?
+      @videos = @videos.where(project_id: params[:project_id])
+      @filter_project = Project.find_by(id: params[:project_id])
+    end
+
+    # Filter by video state
+    if params[:state].present? && Video.aasm.states.map(&:name).map(&:to_s).include?(params[:state])
+      @videos = @videos.where(state: params[:state])
+      @filter_state = params[:state]
+    end
+
+    # Filter by transcript status
+    if params[:transcript].present?
+      case params[:transcript]
+      when "none"
+        @videos = @videos.where.missing(:transcript)
+      when "completed"
+        @videos = @videos.joins(:transcript).where(transcripts: { state: "completed" })
+      when "failed"
+        @videos = @videos.joins(:transcript).where(transcripts: { state: "failed" })
+      when "processing"
+        @videos = @videos.joins(:transcript).where.not(transcripts: { state: %w[completed failed] })
+      end
+      @filter_transcript = params[:transcript]
+    end
+
+    # Search by filename
+    if params[:q].present?
+      @videos = @videos.where("filename ILIKE ?", "%#{params[:q]}%")
+      @filter_query = params[:q]
+    end
+
+    # Counts for filter badges (before pagination)
+    @total_count = Video.count
+    @state_counts = Video.group(:state).count
+    @projects = Project.order(:name)
+
+    # Paginate
+    @videos = @videos.page(params[:page]).per(25)
   end
 
   def show
@@ -121,10 +162,35 @@ class VideosController < ApplicationController
       return
     end
 
-    @video.update!(status: :transcribing)
+    @video.start_transcription!
     TranscriptionJob.perform_later(@video.id)
 
     redirect_to @video, notice: "Transcription started. This may take a while for long videos."
+  end
+
+  def reprocess
+    if @video.braw? && @video.proxy_path.blank?
+      redirect_to @video, alert: ".braw files require a proxy. Please convert to MP4 first."
+      return
+    end
+
+    unless File.exist?(@video.playable_path)
+      redirect_to @video, alert: "Video file not found at: #{@video.playable_path}"
+      return
+    end
+
+    # Check if Whisper server is available
+    whisper = Transcription::WhisperClient.new
+    unless whisper.health_check
+      redirect_to @video, alert: "Whisper server is not available. Please start it first."
+      return
+    end
+
+    # Reset and queue for reprocessing
+    @video.reset_for_reprocessing!
+    @video.queue_for_reprocessing!
+
+    redirect_to @video, notice: "Reprocessing started. Previous transcript has been deleted."
   end
 
   private

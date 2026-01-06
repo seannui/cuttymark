@@ -72,7 +72,7 @@
       </div>
       <div class="ml-4">
         <p class="text-sm font-medium text-gray-500">Status</p>
-        <p class="text-xl font-semibold text-gray-900"><%= @clip.status.titleize %></p>
+        <p class="text-xl font-semibold text-gray-900"><%= @clip.aasm.current_state.to_s.titleize %></p>
       </div>
     </div>
   </div>

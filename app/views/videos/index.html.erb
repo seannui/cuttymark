@@ -10,6 +10,104 @@
   </div>
 </div>
 
+<!-- Filters -->
+<div class="mb-6 bg-white shadow-sm rounded-lg border border-gray-200 p-4">
+  <%= form_tag videos_path, method: :get, class: "flex flex-wrap items-center gap-4" do %>
+    <!-- Search -->
+    <div class="flex-1 min-w-[200px]">
+      <%= text_field_tag :q, @filter_query, placeholder: "Search by filename...", class: "block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm" %>
+    </div>
+
+    <!-- Project Filter -->
+    <div class="w-48">
+      <%= select_tag :project_id,
+            options_from_collection_for_select(@projects, :id, :name, params[:project_id]),
+            include_blank: "All Projects",
+            class: "block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm" %>
+    </div>
+
+    <!-- State Filter -->
+    <div class="w-40">
+      <%= select_tag :state,
+            options_for_select(
+              [["All States", ""]] + Video.aasm.states.map { |s| [s.name.to_s.titleize, s.name.to_s] },
+              params[:state]
+            ),
+            class: "block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm" %>
+    </div>
+
+    <!-- Transcript Filter -->
+    <div class="w-44">
+      <%= select_tag :transcript,
+            options_for_select([
+              ["All Transcripts", ""],
+              ["No Transcript", "none"],
+              ["Completed", "completed"],
+              ["Processing", "processing"],
+              ["Failed", "failed"]
+            ], params[:transcript]),
+            class: "block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm" %>
+    </div>
+
+    <!-- Submit -->
+    <div>
+      <%= submit_tag "Filter", class: "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 cursor-pointer" %>
+    </div>
+  <% end %>
+</div>
+
+<!-- Active Filters Display -->
+<% if @filter_project || @filter_state || @filter_transcript || @filter_query %>
+  <div class="mb-6 bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="text-sm font-medium text-indigo-900">Active filters:</span>
+        <% if @filter_query %>
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+            Search: "<%= @filter_query %>"
+          </span>
+        <% end %>
+        <% if @filter_project %>
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+            Project: <%= @filter_project.name %>
+          </span>
+        <% end %>
+        <% if @filter_state %>
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+            State: <%= @filter_state.titleize %>
+          </span>
+        <% end %>
+        <% if @filter_transcript %>
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+            Transcript: <%= @filter_transcript.titleize %>
+          </span>
+        <% end %>
+      </div>
+      <%= link_to "Clear filters", videos_path, class: "text-sm text-indigo-600 hover:text-indigo-900" %>
+    </div>
+  </div>
+<% end %>
+
+<!-- Stats Cards -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+  <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+    <div class="text-sm font-medium text-gray-500">Total</div>
+    <div class="text-2xl font-semibold text-gray-900"><%= @total_count %></div>
+  </div>
+  <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+    <div class="text-sm font-medium text-gray-500">Ready</div>
+    <div class="text-2xl font-semibold text-green-600"><%= @state_counts["ready"] || 0 %></div>
+  </div>
+  <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+    <div class="text-sm font-medium text-gray-500">Transcribed</div>
+    <div class="text-2xl font-semibold text-indigo-600"><%= @state_counts["transcribed"] || 0 %></div>
+  </div>
+  <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+    <div class="text-sm font-medium text-gray-500">Error</div>
+    <div class="text-2xl font-semibold text-red-600"><%= @state_counts["error"] || 0 %></div>
+  </div>
+</div>
+
 <% if @videos.any? %>
   <div class="bg-white shadow-sm rounded-lg border border-gray-200 overflow-hidden">
     <div class="overflow-x-auto">
@@ -19,7 +117,7 @@
             <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Video</th>
             <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Project</th>
             <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Duration</th>
-            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">State</th>
             <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Transcript</th>
             <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
           </tr>
@@ -47,37 +145,60 @@
                 <%= video.duration_formatted || "-" %>
               </td>
               <td class="px-6 py-4 whitespace-nowrap">
-                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium <%= video.status == 'ready' ? 'bg-green-100 text-green-800' : video.status == 'error' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800' %>">
-                  <%= video.status.titleize %>
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium <%= video.transcribed? ? 'bg-indigo-100 text-indigo-800' : video.ready? ? 'bg-green-100 text-green-800' : video.error? ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800' %>">
+                  <%= video.aasm.current_state.to_s.titleize %>
                 </span>
               </td>
               <td class="px-6 py-4 whitespace-nowrap">
                 <% if video.transcript %>
-                  <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium <%= video.transcript.status == 'completed' ? 'bg-green-100 text-green-800' : video.transcript.status == 'failed' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800' %>">
-                    <%= video.transcript.status.titleize %>
+                  <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium <%= video.transcript.completed? ? 'bg-green-100 text-green-800' : video.transcript.failed? ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800' %>">
+                    <%= video.transcript.aasm.current_state.to_s.titleize %>
                   </span>
                 <% else %>
                   <span class="text-sm text-gray-400">-</span>
                 <% end %>
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                <%= link_to "View", video_path(video), class: "text-indigo-600 hover:text-indigo-900" %>
+                <%= render 'video_links', video: video %>
               </td>
             </tr>
           <% end %>
         </tbody>
       </table>
     </div>
+
+    <!-- Pagination -->
+    <% if @videos.total_pages > 1 %>
+      <div class="bg-white px-4 py-3 border-t border-gray-200 sm:px-6">
+        <div class="flex items-center justify-between">
+          <div class="text-sm text-gray-700">
+            Showing <span class="font-medium"><%= @videos.offset_value + 1 %></span> to
+            <span class="font-medium"><%= [@videos.offset_value + @videos.limit_value, @videos.total_count].min %></span> of
+            <span class="font-medium"><%= @videos.total_count %></span> results
+          </div>
+          <div class="flex space-x-2">
+            <%= paginate @videos %>
+          </div>
+        </div>
+      </div>
+    <% end %>
   </div>
 <% else %>
   <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
     <svg class="mx-auto h-16 w-16 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
     </svg>
-    <h3 class="mt-4 text-lg font-medium text-gray-900">No videos yet</h3>
-    <p class="mt-2 text-sm text-gray-500">Add videos to your projects to get started.</p>
-    <div class="mt-6">
-      <%= link_to "Add Video", new_video_path, class: "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700" %>
-    </div>
+    <h3 class="mt-4 text-lg font-medium text-gray-900">No videos found</h3>
+    <% if @filter_project || @filter_state || @filter_transcript || @filter_query %>
+      <p class="mt-2 text-sm text-gray-500">Try adjusting your filters.</p>
+      <div class="mt-6">
+        <%= link_to "Clear filters", videos_path, class: "inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md shadow-sm text-gray-700 bg-white hover:bg-gray-50" %>
+      </div>
+    <% else %>
+      <p class="mt-2 text-sm text-gray-500">Add videos to your projects to get started.</p>
+      <div class="mt-6">
+        <%= link_to "Add Video", new_video_path, class: "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700" %>
+      </div>
+    <% end %>
   </div>
 <% end %>

@@ -1,0 +1,32 @@
+<% links = [] %>
+
+<% links << {
+  title: 'View',
+  url: video_path(video)
+} %>
+
+<% links << {
+  title: 'Project',
+  url: project_path(video.project)
+} %>
+
+<% if video.ready? && video.transcript.nil? %>
+  <% links << {
+    title: 'Transcribe',
+    url: transcribe_video_path(video),
+    options: { method: :post }
+  } %>
+<% elsif video.transcribed? || video.transcript&.completed? %>
+  <% links << {
+    title: 'Reprocess',
+    url: reprocess_video_path(video),
+    options: { method: :post }
+  } %>
+<% end %>
+
+<% links << {
+  title: 'Edit',
+  url: edit_video_path(video)
+} %>
+
+<%= render 'shared/actions_dropdown', links: links %>

@@ -6,7 +6,7 @@ class ClipRenderJob < ApplicationJob
 
     Rails.logger.info("[ClipRenderJob] Starting render for clip: #{clip.id}")
 
-    clip.update!(status: :rendering)
+    clip.start_render!
 
     begin
       ffmpeg = VideoProcessing::FfmpegClient.new
@@ -23,14 +23,12 @@ class ClipRenderJob < ApplicationJob
         end_time: clip.end_time
       )
 
-      clip.update!(
-        status: :rendered,
-        export_path: output_path
-      )
+      clip.finish_render!
+      clip.update!(export_path: output_path)
 
       Rails.logger.info("[ClipRenderJob] Completed render for clip: #{clip.id} -> #{output_path}")
     rescue VideoProcessing::FfmpegClient::Error => e
-      clip.update!(status: :failed)
+      clip.fail!
       Rails.logger.error("[ClipRenderJob] Failed to render clip #{clip.id}: #{e.message}")
       raise e
     end

@@ -11,7 +11,7 @@ module Embeddings
     def generate_for_transcript(transcript)
       Rails.logger.info("Generating embeddings for transcript: #{transcript.id}")
 
-      transcript.update!(status: :embedding)
+      transcript.start_embedding! if transcript.may_start_embedding?
 
       # Get sentence segments that need embeddings
       segments = transcript.sentence_segments.where(embedding: nil)
@@ -28,7 +28,6 @@ module Embeddings
         end
       end
 
-      transcript.update!(status: :completed)
       Rails.logger.info("Embedding generation complete for transcript: #{transcript.id}")
 
       segments.count
