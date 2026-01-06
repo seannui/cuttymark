@@ -82,12 +82,14 @@ module Transcription
     def parse_response(body)
       data = JSON.parse(body)
 
+      segments = parse_segments(data["segments"] || [])
+
       Result.new(
         text: data["text"]&.strip,
         language: data["language"],
         duration: data["duration"],
-        segments: parse_segments(data["segments"] || []),
-        words: parse_words(data)
+        segments: segments,
+        words: parse_words(segments)
       )
     end
 
@@ -103,18 +105,29 @@ module Transcription
       end
     end
 
-    def parse_words(data)
+    def parse_words(segments)
+      # whisper.cpp word timestamps are unreliable for long audio (they wrap after ~6 min)
+      # Generate word timings by distributing segment duration across words instead
       words = []
 
-      # whisper.cpp returns words nested in segments
-      (data["segments"] || []).each do |segment|
-        (segment["words"] || []).each do |word|
+      segments.each do |segment|
+        text = segment.text || ""
+        segment_words = text.split(/\s+/).reject(&:empty?)
+        next if segment_words.empty?
+
+        duration = segment.end_time - segment.start_time
+        word_duration = duration / segment_words.size
+
+        segment_words.each_with_index do |word_text, i|
+          word_start = segment.start_time + (i * word_duration)
+          word_end = word_start + word_duration
+
           words << WordData.new(
-            start_time: word["start"],
-            end_time: word["end"],
-            text: word["word"]&.strip,
-            confidence: word["probability"],
-            speaker: nil  # Whisper doesn't provide speaker diarization
+            start_time: word_start,
+            end_time: word_end,
+            text: word_text,
+            confidence: segment.confidence || 0.9,
+            speaker: nil
           )
         end
       end
