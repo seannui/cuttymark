@@ -5,7 +5,7 @@ gem "rails", "~> 8.1.1"
 # The modern asset pipeline for Rails [https://github.com/rails/propshaft]
 gem "propshaft"
 # Use PostgreSQL as the database for Active Record
-gem "pg", "1.5.9"
+gem "pg", "1.6.3"
 # Use SQLite for Solid Queue
 gem "sqlite3", ">= 2.1"
 # Vector similarity search for pgvector
