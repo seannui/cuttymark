@@ -17,10 +17,39 @@ module Search
     end
 
     # Used by hybrid search to find text matches for semantic queries
+    # Prioritizes exact phrase matches, then individual word matches
     def search_fuzzy_for_hybrid(search_query, limit: DEFAULT_LIMIT)
       query_text = search_query.query_text.downcase.strip
       segments_scope = searchable_segments(search_query.project)
-      fuzzy_search(search_query, segments_scope, query_text, limit)
+
+      # First: exact phrase matches (highest priority)
+      exact_matches = exact_search(search_query, segments_scope, query_text, limit)
+      return exact_matches if exact_matches.size >= limit
+
+      # Second: word boundary matches for individual words
+      remaining = limit - exact_matches.size
+      word_matches = word_boundary_search(search_query, segments_scope, query_text, remaining)
+
+      exact_matches + word_matches
+    end
+
+    # Search for individual words with proper word boundaries
+    def word_boundary_search(search_query, scope, query_text, limit)
+      words = query_text.split(/\s+/).reject(&:blank?)
+      return [] if words.empty?
+
+      # Use PostgreSQL regex with word boundaries to avoid matching "rob" in "problem"
+      conditions = words.map { "text ~* ?" }.join(" OR ")
+      values = words.map { |w| "\\m#{Regexp.escape(w)}\\M" }
+
+      already_matched = search_query.matches.pluck(:segment_id)
+      matching_segments = scope.where(conditions, *values)
+                               .where.not(id: already_matched)
+                               .limit(limit)
+
+      create_matches(search_query, matching_segments) do |segment|
+        calculate_fuzzy_relevance(segment.text, words)
+      end
     end
 
     private

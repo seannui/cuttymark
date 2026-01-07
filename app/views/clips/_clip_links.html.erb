@@ -1,0 +1,35 @@
+<% links = [] %>
+
+<% unless local_assigns[:context] == :show %>
+  <% links << {
+    title: 'View',
+    url: clip_path(clip)
+  } %>
+<% end %>
+
+<% links << {
+  title: 'Edit',
+  url: edit_clip_path(clip)
+} %>
+
+<% if clip.defined? || clip.failed? %>
+  <% links << {
+    title: 'Render',
+    url: render_clip_clip_path(clip),
+    options: { method: :post }
+  } %>
+<% elsif clip.rendered? %>
+  <% links << {
+    title: 'Re-render',
+    url: render_clip_clip_path(clip),
+    options: { method: :post }
+  } %>
+<% end %>
+
+<% links << {
+  title: 'Delete',
+  url: clip_path(clip),
+  options: { method: :delete, data: { turbo_confirm: 'Are you sure you want to delete this clip?' } }
+} %>
+
+<%= render 'shared/actions_dropdown', links: links %>

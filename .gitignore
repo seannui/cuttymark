@@ -34,3 +34,4 @@
 /config/*.key
 
 .DS_Store
+/.playwright-mcp

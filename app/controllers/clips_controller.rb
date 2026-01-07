@@ -52,9 +52,8 @@ class ClipsController < ApplicationController
   end
 
   def destroy
-    video = @clip.video
     @clip.destroy
-    redirect_to video_path(video), notice: "Clip was successfully deleted."
+    redirect_back fallback_location: clips_path, notice: "Clip was successfully deleted."
   end
 
   def render_clip

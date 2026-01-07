@@ -39,11 +39,15 @@ module Search
       combined = {}
 
       # Add keyword matches with boosted score
+      query_text = search_query.query_text.downcase
       keyword_matches.each do |match|
         combined[match.segment_id] = match
-        # Boost keyword match scores
-        if match.relevance_score < 0.8
-          match.update(relevance_score: [match.relevance_score + 0.3, 1.0].min)
+        # Exact phrase matches get highest score
+        if match.segment.text.downcase.include?(query_text)
+          match.update(relevance_score: 1.0)
+        elsif match.relevance_score < 0.8
+          # Partial word matches get boosted
+          match.update(relevance_score: [match.relevance_score + 0.3, 0.95].min)
         end
       end
 

@@ -14,7 +14,7 @@
 </div>
 
 <% if @clips.any? %>
-  <div class="bg-white shadow-sm rounded-lg border border-gray-200 overflow-hidden">
+  <div class="bg-white shadow-sm rounded-lg border border-gray-200">
     <div class="overflow-x-auto">
       <table class="min-w-full divide-y divide-gray-200">
         <thead class="bg-gray-50">
@@ -65,7 +65,7 @@
                 </span>
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                <%= link_to "View", clip_path(clip), class: "text-indigo-600 hover:text-indigo-900" %>
+                <%= render 'clip_links', clip: clip %>
               </td>
             </tr>
           <% end %>

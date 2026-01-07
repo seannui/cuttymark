@@ -13,12 +13,13 @@ module Transcription
 
     # Compact prompt for long files - segments only, no word-level timestamps
     TRANSCRIPTION_PROMPT_COMPACT = <<~PROMPT.freeze
-      Transcribe this audio verbatim with speaker labels and timestamps.
+      Transcribe this audio file COMPLETELY from start to end with speaker labels and accurate timestamps.
 
       Return the transcription in this exact JSON format:
       {
         "text": "complete transcript without timestamps",
         "language": "detected language code (e.g., en)",
+        "audio_duration": 120.5,
         "segments": [
           {
             "start": 0.0,
@@ -29,9 +30,14 @@ module Transcription
         ]
       }
 
-      Important:
+      CRITICAL REQUIREMENTS:
+      - Transcribe the ENTIRE audio from beginning to end - do not stop early
+      - Timestamps must be accurate to the actual audio timing
+      - The first segment should start near 0.0 seconds
+      - The last segment should end near the total audio duration
       - Each segment should be 1-3 sentences (not individual words)
       - Include timestamps in seconds (floating point)
+      - Include audio_duration field with total length in seconds
       - Label speakers consistently (Speaker 1, Speaker 2, etc.)
       - Return ONLY valid JSON, no markdown or explanation
     PROMPT
@@ -152,10 +158,16 @@ module Transcription
         begin
           # Transcribe chunk
           response = transcribe_chunk_audio(chunk_path)
-          result = parse_response(response, compact: true)
+          result = parse_response(response, compact: true, expected_duration: actual_duration)
+
+          # Scale timestamps if Gemini's coverage is significantly off
+          scaled_segments = scale_timestamps_if_needed(result.segments, actual_duration)
+
+          # Regenerate words from scaled segments (original words have wrong timing)
+          scaled_words = generate_words_from_segments(scaled_segments)
 
           # Offset timestamps by chunk start time
-          offset_segments = result.segments.map do |seg|
+          offset_segments = scaled_segments.map do |seg|
             SegmentData.new(
               start_time: seg.start_time + chunk_start,
               end_time: seg.end_time + chunk_start,
@@ -165,7 +177,7 @@ module Transcription
             )
           end
 
-          offset_words = result.words.map do |word|
+          offset_words = scaled_words.map do |word|
             WordData.new(
               start_time: word.start_time + chunk_start,
               end_time: word.end_time + chunk_start,
@@ -239,6 +251,32 @@ module Transcription
       else
         transcribe_inline(chunk_path, compact: true)
       end
+    end
+
+    def scale_timestamps_if_needed(segments, expected_duration)
+      return segments if segments.empty?
+
+      last_end = segments.map(&:end_time).max
+      return segments if last_end.nil? || last_end <= 0
+
+      # Allow 5% tolerance before scaling
+      coverage_ratio = last_end / expected_duration
+      if coverage_ratio < 0.95
+        scale_factor = expected_duration / last_end
+        Rails.logger.warn("Gemini timestamp coverage low (#{(coverage_ratio * 100).round(1)}%), scaling by #{scale_factor.round(3)}")
+
+        return segments.map do |seg|
+          SegmentData.new(
+            start_time: seg.start_time * scale_factor,
+            end_time: seg.end_time * scale_factor,
+            text: seg.text,
+            confidence: seg.confidence,
+            speaker: seg.speaker
+          )
+        end
+      end
+
+      segments
     end
 
     def merge_overlapping_segments(segments, overlap)
@@ -430,7 +468,7 @@ module Transcription
       JSON.parse(response.body)
     end
 
-    def parse_response(response, compact: false)
+    def parse_response(response, compact: false, expected_duration: nil)
       # Log token usage for debugging
       usage = response["usageMetadata"]
       if usage
@@ -479,6 +517,15 @@ module Transcription
       rescue JSON::ParserError => e
         Rails.logger.error("Failed to parse Gemini response as JSON (length=#{text_content.length}): #{text_content[-200..]}")
         raise TranscriptionError, "Invalid JSON response from Gemini: #{e.message}"
+      end
+
+      # Log if Gemini reports a different duration than expected
+      if expected_duration && data["audio_duration"]
+        reported = data["audio_duration"].to_f
+        diff = (reported - expected_duration).abs
+        if diff > 5
+          Rails.logger.warn("Gemini reported duration #{reported.round(1)}s vs expected #{expected_duration.round(1)}s (diff: #{diff.round(1)}s)")
+        end
       end
 
       segments = parse_segments(data["segments"] || [])
