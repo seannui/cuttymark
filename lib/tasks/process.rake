@@ -525,3 +525,29 @@ namespace :cm do
     "%.1f %s" % [bytes.to_f / 1024**exp, units[exp]]
   end
 end
+
+  desc "Clean up broken words in transcripts using LLM"
+  task :cleanup_text, [:transcript_id] => :environment do |_t, args|
+    transcript_id = args[:transcript_id]
+    
+    service = Transcription::TextCleanupService.new
+    
+    if transcript_id.present?
+      transcript = Transcript.find(transcript_id)
+      puts "Cleaning transcript #{transcript.id} for video #{transcript.video_id}..."
+      count = service.cleanup_transcript(transcript)
+      puts "Cleaned #{count} segments"
+    else
+      puts "Cleaning all transcripts with broken words..."
+      # Find transcripts with likely broken words
+      Transcript.joins(:segments)
+        .where(segments: { segment_type: 'sentence' })
+        .where("segments.text LIKE '% iner%' OR segments.text LIKE '%ader ie%' OR segments.text LIKE '%st le%'")
+        .distinct
+        .find_each do |transcript|
+          puts "Cleaning transcript #{transcript.id}..."
+          count = service.cleanup_transcript(transcript)
+          puts "  Cleaned #{count} segments"
+        end
+    end
+  end
