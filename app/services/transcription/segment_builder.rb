@@ -9,10 +9,11 @@ module Transcription
     MAX_REPETITION_COUNT = 3  # Max times same word can appear in a row
     MIN_WORD_DURATION = 0.01  # Minimum realistic word duration in seconds
     MAX_WORD_DURATION = 10.0  # Maximum realistic word duration
+    MAX_SENTENCE_REPETITIONS = 3  # Max times same sentence can appear in transcript
 
     def initialize(transcript)
       @transcript = transcript
-      @stats = { filtered_low_confidence: 0, filtered_overlapping: 0, filtered_repetitions: 0, filtered_invalid_duration: 0 }
+      @stats = { filtered_low_confidence: 0, filtered_overlapping: 0, filtered_repetitions: 0, filtered_invalid_duration: 0, filtered_sentence_hallucinations: 0 }
     end
 
     def build_from_whisper_result(result)
@@ -24,17 +25,22 @@ module Transcription
         filtered_words = filter_hallucinations(result.words)
         word_segments = create_word_segments(filtered_words)
 
-        Rails.logger.info("SegmentBuilder filtering stats: #{@stats}")
+        Rails.logger.info("SegmentBuilder word filtering stats: #{@stats}")
 
         # Build sentences from words
         sentence_segments = create_sentence_segments(word_segments)
 
-        # Build paragraphs from sentences
-        paragraph_segments = create_paragraph_segments(sentence_segments)
+        # Filter hallucinated sentences (repeated more than threshold times)
+        filtered_sentences = filter_sentence_hallucinations(sentence_segments)
+
+        Rails.logger.info("SegmentBuilder sentence filtering: #{@stats[:filtered_sentence_hallucinations]} hallucinated sentences removed")
+
+        # Build paragraphs from filtered sentences
+        paragraph_segments = create_paragraph_segments(filtered_sentences)
 
         {
           words: word_segments.count,
-          sentences: sentence_segments.count,
+          sentences: filtered_sentences.count,
           paragraphs: paragraph_segments.count,
           filtered: @stats
         }
@@ -86,19 +92,113 @@ module Transcription
       filtered
     end
 
+    def filter_sentence_hallucinations(sentences)
+      return sentences if sentences.empty?
+
+      # Count occurrences of each normalized sentence text
+      text_counts = sentences.group_by { |s| normalize_sentence(s.text) }.transform_values(&:size)
+
+      # Find hallucinated texts (appearing more than threshold times)
+      hallucinated_texts = text_counts.select { |_, count| count > MAX_SENTENCE_REPETITIONS }.keys
+
+      if hallucinated_texts.any?
+        Rails.logger.warn("Detected #{hallucinated_texts.size} hallucinated sentences: #{hallucinated_texts.first(3).map { |t| t[0..30] }.join(', ')}...")
+      end
+
+      # Keep only the first occurrence of hallucinated sentences, delete the rest
+      seen_hallucinations = Set.new
+      keep = []
+      delete_ids = []
+
+      sentences.each do |sentence|
+        normalized = normalize_sentence(sentence.text)
+        if hallucinated_texts.include?(normalized)
+          if seen_hallucinations.include?(normalized)
+            delete_ids << sentence.id
+            @stats[:filtered_sentence_hallucinations] += 1
+          else
+            seen_hallucinations.add(normalized)
+            keep << sentence
+          end
+        else
+          keep << sentence
+        end
+      end
+
+      # Delete the hallucinated sentence records from the database
+      if delete_ids.any?
+        Segment.where(id: delete_ids).destroy_all
+        Rails.logger.info("Deleted #{delete_ids.size} hallucinated sentence segments")
+      end
+
+      keep
+    end
+
+    def normalize_sentence(text)
+      text.to_s.downcase.gsub(/[^\w\s]/, "").gsub(/\s+/, " ").strip
+    end
+
     def create_word_segments(words)
       return [] if words.empty?
 
-      words.map do |word|
+      # Merge BPE subword tokens into complete words
+      merged_words = merge_subword_tokens(words)
+
+      merged_words.map do |word|
         @transcript.segments.create!(
-          text: word.text,
-          start_time: word.start_time,
-          end_time: word.end_time,
-          confidence: word.confidence,
-          speaker: word.speaker,
+          text: word[:text],
+          start_time: word[:start_time],
+          end_time: word[:end_time],
+          confidence: word[:confidence],
+          speaker: word[:speaker],
           segment_type: "word"
         )
       end
+    end
+
+    # Whisper uses BPE tokenization which splits words into subword tokens.
+    # Tokens that start with a space begin a new word; tokens without leading
+    # space are continuations of the previous word.
+    # Example: "Reiner" -> [" Re", "iner"], "I'm" -> [" I", "'m"]
+    def merge_subword_tokens(words)
+      return [] if words.empty?
+
+      merged = []
+      current_word = nil
+
+      words.each do |word|
+        text = word.text.to_s
+
+        # Check if this token starts a new word (has leading space or is first)
+        starts_new_word = text.start_with?(" ") || current_word.nil?
+
+        if starts_new_word
+          # Save previous word if exists
+          merged << current_word if current_word
+
+          # Start new word
+          current_word = {
+            text: text.strip,
+            start_time: word.start_time,
+            end_time: word.end_time,
+            confidence: word.confidence,
+            speaker: word.speaker
+          }
+        else
+          # Continuation token - merge with current word
+          if current_word
+            current_word[:text] += text
+            current_word[:end_time] = word.end_time
+            # Average confidence for merged tokens
+            current_word[:confidence] = (current_word[:confidence] + (word.confidence || 0.9)) / 2.0
+          end
+        end
+      end
+
+      # Don't forget the last word
+      merged << current_word if current_word
+
+      merged
     end
 
     def create_sentence_segments(word_segments)
