@@ -4,7 +4,18 @@ This guide explains how to convert Blackmagic RAW (.braw) files to 4K MP4 format
 
 ## Overview
 
-FFmpeg does not natively support BRAW (Blackmagic RAW). BRAW is a proprietary format requiring the Blackmagic RAW SDK for decoding. This guide uses **braw-decode-macOS** to decode BRAW files and pipe the output to FFmpeg for encoding.
+FFmpeg does not natively support BRAW (Blackmagic RAW). BRAW is a proprietary format requiring the Blackmagic RAW SDK for decoding. This guide uses **braw-decode** to decode BRAW files and pipe the output to FFmpeg for encoding.
+
+### Decoder Versions
+
+There are two versions of braw-decode available:
+
+| Version | Directory | Description |
+|---------|-----------|-------------|
+| **braw-decode-metal** | `~/git/braw-decode-metal` | Metal GPU-accelerated (recommended for Apple Silicon) |
+| **braw-decode-macOS** | `~/git/braw-decode-macOS` | CPU-only version (fallback) |
+
+The **Metal GPU version** is ~1.7x faster and uses significantly less CPU (18% vs 100%), leaving cycles free for FFmpeg encoding. It's automatically preferred when available.
 
 ## Prerequisites
 
@@ -22,11 +33,36 @@ FFmpeg does not natively support BRAW (Blackmagic RAW). BRAW is a proprietary fo
 2. Download the macOS SDK (requires free registration)
 3. Mount the DMG and locate the SDK files
 
-### Step 2: Clone and Build braw-decode-macOS
+### Step 2: Clone and Build braw-decode
+
+You can build either the Metal GPU version (recommended) or the CPU-only version.
+
+#### Option A: Metal GPU Version (Recommended for Apple Silicon)
 
 ```bash
-# Clone the repository
-cd ~/git  # or preferred location
+cd ~/git
+git clone https://github.com/meisa233/braw-decode-macOS.git braw-decode-metal
+cd braw-decode-metal
+
+# Copy SDK files from downloaded SDK
+# - Copy "Include" folder to project root
+# - Copy "Libraries" folder to project root
+
+# The Metal version requires renaming/converting source files to Objective-C++
+# and updating the Makefile for Metal framework support.
+# See "Building the Metal GPU Version" section below for details.
+
+# Build
+make
+
+# Verify the binary was created
+ls -la ./braw-decode-metal
+```
+
+#### Option B: CPU-Only Version (Fallback)
+
+```bash
+cd ~/git
 git clone https://github.com/meisa233/braw-decode-macOS.git
 cd braw-decode-macOS
 
@@ -41,7 +77,112 @@ make
 ls -la ../braw-decode
 ```
 
-**Note**: The Makefile places the compiled `braw-decode` binary one directory up from `braw-decode-macOS/` (i.e., at `~/git/braw-decode`).
+**Note**: The original Makefile places the compiled `braw-decode` binary one directory up from `braw-decode-macOS/` (i.e., at `~/git/braw-decode`).
+
+### Building the Metal GPU Version
+
+The Metal GPU version requires modifications to use Objective-C++ and link against the Metal framework. Here are the key changes:
+
+#### 1. Update the Makefile
+
+```makefile
+# braw-decode-metal Makefile
+TARGET_EXEC := braw-decode-metal
+
+BUILD_DIR := ./build
+SRC_DIRS := ./src ./Include ./Libraries
+
+# Frameworks needed for Metal GPU decoding
+LDFLAGS = -lpthread -ldl \
+          -framework CoreFoundation \
+          -framework Metal \
+          -framework Foundation \
+          -framework CoreGraphics \
+          -framework ImageIO \
+          -framework CoreServices
+
+# Find all source files (C, C++, Objective-C++)
+SRCS := $(shell find $(SRC_DIRS) -name '*.cpp' -or -name '*.c' -or -name '*.mm' -or -name '*.s' 2>/dev/null)
+
+# ... rest of Makefile ...
+
+# Objective-C++ flags (for .mm files)
+OBJCXXFLAGS := $(INC_FLAGS) -std=c++11 -MMD -MP -g -fobjc-arc
+
+# Build step for Objective-C++ source (.mm files)
+$(BUILD_DIR)/%.mm.o: %.mm
+	mkdir -p $(dir $@)
+	clang++ $(OBJCXXFLAGS) -c $< -o $@
+```
+
+#### 2. Convert Source Files to Objective-C++
+
+Rename the source files to use `.mm` extension for Objective-C++:
+
+```bash
+mv src/braw.cpp src/braw.mm
+mv src/main.cpp src/main.mm
+```
+
+#### 3. Key Code Changes in braw.mm
+
+Add Metal framework import to the header:
+```cpp
+#import <Metal/Metal.h>
+```
+
+Initialize Metal pipeline in `Braw::initializeMetal()`:
+```cpp
+// Create pipeline device iterator to find Metal GPU
+IBlackmagicRawPipelineDeviceIterator* deviceIterator = nullptr;
+result = factory->CreatePipelineDeviceIterator(
+    blackmagicRawPipelineMetal,
+    blackmagicRawInteropNone,
+    &deviceIterator
+);
+
+// Create the Metal device
+result = deviceIterator->CreateDevice(&metalDevice);
+
+// Configure the codec to use Metal
+result = config->SetFromDevice(metalDevice);
+```
+
+Handle Metal GPU buffers in `ProcessComplete()`:
+```cpp
+// Check if this is a GPU resource
+BlackmagicRawResourceType resourceType;
+processedImage->GetResourceType(&resourceType);
+
+if (resourceType == blackmagicRawResourceTypeBufferMetal) {
+    // GPU buffer is in private storage - copy to CPU for output
+    id<MTLBuffer> metalBuffer = (__bridge id<MTLBuffer>)resourcePtr;
+
+    if ([metalBuffer storageMode] == MTLStorageModePrivate) {
+        // Create shared buffer and blit copy from GPU
+        id<MTLDevice> device = [metalBuffer device];
+        id<MTLBuffer> cpuBuffer = [device newBufferWithLength:bufferLength
+                                                      options:MTLResourceStorageModeShared];
+        // ... blit copy and output ...
+    }
+}
+```
+
+#### 4. Add --cpu Flag
+
+Add a flag to force CPU mode for testing/fallback:
+```
+-C, --cpu    Force CPU decoding (disable Metal GPU acceleration)
+```
+
+#### Performance Comparison (Apple M2, 64 frames 4K)
+
+| Mode | Wall Time | CPU Time |
+|------|-----------|----------|
+| Metal GPU | 0.46s | 0.92s |
+| CPU | 0.77s | 5.03s |
+
+Metal GPU is **1.7x faster** and uses only **18% of CPU time**.
 
 ### Step 3: Test with a Single File
 
@@ -221,22 +362,49 @@ The Cuttymark app includes a `BrawDecoder` service and rake task for batch conve
 ### Environment Variables
 
 The service automatically looks for `braw-decode` in these locations (in order):
-1. `BRAW_DECODE_PATH` environment variable
-2. `~/git/braw-decode`
-3. `/Volumes/stubsdosdos/git/braw-decode`
-4. System PATH
+1. `BRAW_DECODE_PATH` environment variable (highest priority)
+2. **Metal GPU version**: `~/git/braw-decode-metal/braw-decode-metal`
+3. **Metal GPU version**: `/Volumes/stubsdosdos/git/braw-decode-metal/braw-decode-metal`
+4. CPU version: `~/git/braw-decode-macOS/braw-decode`
+5. CPU version: `/Volumes/stubsdosdos/git/braw-decode-macOS/braw-decode`
+6. Legacy paths: `~/git/braw-decode`, `/Volumes/stubsdosdos/git/braw-decode`
+7. System PATH (`braw-decode-metal` or `braw-decode`)
 
 And for the Libraries directory:
 1. `BRAW_DECODE_DIR` environment variable
-2. `~/git/braw-decode-macOS`
-3. `/Volumes/stubsdosdos/git/braw-decode-macOS`
-4. Directory containing the braw-decode executable
+2. `~/git/braw-decode-metal`
+3. `/Volumes/stubsdosdos/git/braw-decode-metal`
+4. `~/git/braw-decode-macOS`
+5. `/Volumes/stubsdosdos/git/braw-decode-macOS`
+6. Directory containing the braw-decode executable
 
-Optionally set these in your shell or `.env` file to override:
+**The Metal GPU version is automatically preferred when available.**
+
+#### Configuration via .env File
+
+Create a `.env` file in the project root (see `.env.example` for template):
 
 ```bash
-BRAW_DECODE_PATH=~/git/braw-decode
-BRAW_DECODE_DIR=~/git/braw-decode-macOS
+# Use Metal GPU version (recommended)
+BRAW_DECODE_PATH=/Users/yourname/git/braw-decode-metal/braw-decode-metal
+
+# Or force CPU version
+# BRAW_DECODE_PATH=/Users/yourname/git/braw-decode-macOS/braw-decode
+
+# Optional: specify Libraries directory if different from executable location
+# BRAW_DECODE_DIR=/Users/yourname/git/braw-decode-metal
+```
+
+#### Command-Line Override
+
+You can override the decoder for a single command:
+
+```bash
+# Use Metal GPU version
+BRAW_DECODE_PATH=~/git/braw-decode-metal/braw-decode-metal rake cm:convert_braw[/path/to/folder]
+
+# Use CPU version
+BRAW_DECODE_PATH=~/git/braw-decode-macOS/braw-decode rake cm:convert_braw[/path/to/folder]
 ```
 
 ### Rake Task Usage
@@ -376,27 +544,58 @@ When using the rake task or Ruby API, you can control encoder selection:
 ### CPU vs GPU Decoding
 
 The **Blackmagic RAW SDK** supports GPU acceleration via:
-- **Metal** (macOS)
+- **Metal** (macOS) ✅ Supported by braw-decode-metal
 - **CUDA** (NVIDIA)
 - **OpenCL** (cross-platform)
 
-However, **braw-decode is CPU-only**. It uses multi-threaded CPU decoding with the `-t` flag. This is still reasonably fast due to SDK optimizations for AVX, AVX2, and SSE4.1.
+#### braw-decode-metal (Recommended)
 
-Note: While braw-decode uses CPU for decoding, the FFmpeg encoding step can use hardware acceleration (VideoToolbox, NVENC, etc.), which is where most of the processing time is spent.
+The **Metal GPU version** (`braw-decode-metal`) uses Apple's Metal framework for GPU-accelerated decoding on macOS. This provides significant performance benefits:
 
-For fully GPU-accelerated conversion (both decode and encode), use DaVinci Resolve instead.
+| Metric | Metal GPU | CPU-Only |
+|--------|-----------|----------|
+| Wall Time (64 frames 4K) | 0.46s | 0.77s |
+| CPU Time | 0.92s | 5.03s |
+| CPU Usage | ~18% | ~100% |
+| Speedup | **1.7x faster** | baseline |
+
+The Metal version automatically:
+- Detects the best available Metal GPU device
+- Uses GPU-accelerated decoding pipeline
+- Copies decoded frames from GPU to CPU memory for piping to FFmpeg
+- Falls back to CPU if Metal is unavailable
+
+Use the `-C` or `--cpu` flag to force CPU mode for testing:
+```bash
+./braw-decode-metal -C -n /path/to/file.braw
+```
+
+#### braw-decode-macOS (CPU Fallback)
+
+The original **CPU-only version** uses multi-threaded CPU decoding with the `-t` flag. Still reasonably fast due to SDK optimizations for AVX, AVX2, and SSE4.1.
+
+#### Combined GPU Pipeline
+
+For maximum performance, use **both** GPU-accelerated decoding AND encoding:
+- **Decode**: braw-decode-metal (Metal GPU)
+- **Encode**: FFmpeg with VideoToolbox (h264_videotoolbox or hevc_videotoolbox)
+
+This keeps CPU usage minimal and leverages the GPU for the entire pipeline.
+
+For fully integrated GPU-accelerated conversion with color grading, use DaVinci Resolve instead.
 
 ### braw-decode CLI Options
 
 ```
 -n, --info           Print clip details (resolution, framerate, frame count)
 -f, --ff-format      Print FFmpeg input arguments
--t, --threads N      Number of CPU threads (default: 1, recommended: 8)
+-t, --threads N      Number of decode threads (CPU) or jobs in flight (GPU)
 -c, --color-format   Output format: rgba, bgra, 16il, 16pl, f32s, f32p, f32a
 -i, --in N           Start frame index
 -o, --out N          End frame index
 -s, --scale N        Scale factor: 1, 2, 4, or 8 (8-bit formats only)
 -v, --verbose        Print more info to stderr
+-C, --cpu            Force CPU decoding (disable Metal GPU) [Metal version only]
 ```
 
 ### Recommended Settings
@@ -421,8 +620,10 @@ DaVinci Resolve uses full GPU acceleration for BRAW decoding and is significantl
 
 ## References
 
-- [braw-decode-macOS](https://github.com/meisa233/braw-decode-macOS) - macOS fork of braw-decode
+- **braw-decode-metal** - Metal GPU-accelerated version (local: `~/git/braw-decode-metal`)
+- [braw-decode-macOS](https://github.com/meisa233/braw-decode-macOS) - macOS fork of braw-decode (CPU-only)
 - [Blackmagic RAW SDK](https://www.blackmagicdesign.com/developer/products/braw) - Official SDK
 - [Blackmagic RAW SDK Developer Manual](https://documents.blackmagicdesign.com/DeveloperManuals/BlackmagicRAW-SDK.pdf) - Full API documentation
 - [braw-decode (original)](https://github.com/AkBKukU/braw-decode) - Original Linux project
 - [FFmpeg Documentation](https://ffmpeg.org/documentation.html)
+- [Apple Metal Documentation](https://developer.apple.com/metal/) - Metal framework reference

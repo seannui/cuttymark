@@ -330,31 +330,51 @@ module VideoProcessing
     end
 
     def find_braw_decode
+      # Priority order:
+      # 1. Environment variable (allows override)
+      # 2. Metal GPU version (faster)
+      # 3. CPU version (fallback)
+      # 4. System PATH
       paths = [
         ENV["BRAW_DECODE_PATH"],
+        # Metal GPU version (preferred for performance)
+        File.expand_path("~/git/braw-decode-metal/braw-decode-metal"),
+        "/Volumes/stubsdosdos/git/braw-decode-metal/braw-decode-metal",
+        # CPU version (fallback)
+        File.expand_path("~/git/braw-decode-macOS/braw-decode"),
+        "/Volumes/stubsdosdos/git/braw-decode-macOS/braw-decode",
         File.expand_path("~/git/braw-decode"),
         "/Volumes/stubsdosdos/git/braw-decode",
+        `which braw-decode-metal 2>/dev/null`.strip,
         `which braw-decode 2>/dev/null`.strip
       ].compact.reject(&:empty?)
 
       found = paths.find { |p| File.executable?(p) }
-      raise ExecutableNotFoundError, "braw-decode not found. Set BRAW_DECODE_PATH or ensure it's in PATH." unless found
+      raise ExecutableNotFoundError, "braw-decode not found. Set BRAW_DECODE_PATH environment variable." unless found
+
+      # Log which version we're using
+      is_metal = found.include?("metal")
+      Rails.logger.info("Using braw-decode: #{found} (#{is_metal ? 'Metal GPU' : 'CPU'})")
 
       found
     end
 
     def find_braw_decode_dir
       # The braw-decode executable must be run from the directory containing the Libraries folder
-      # Typically this is braw-decode-macOS directory
+      # Priority order matches find_braw_decode
       paths = [
         ENV["BRAW_DECODE_DIR"],
+        # Metal GPU version directory
+        File.expand_path("~/git/braw-decode-metal"),
+        "/Volumes/stubsdosdos/git/braw-decode-metal",
+        # CPU version directory
         File.expand_path("~/git/braw-decode-macOS"),
         "/Volumes/stubsdosdos/git/braw-decode-macOS",
         File.dirname(@braw_decode_path)
       ].compact.reject(&:empty?)
 
       found = paths.find { |p| Dir.exist?(p) && Dir.exist?(File.join(p, "Libraries")) }
-      raise ExecutableNotFoundError, "braw-decode Libraries directory not found. Set BRAW_DECODE_DIR." unless found
+      raise ExecutableNotFoundError, "braw-decode Libraries directory not found. Set BRAW_DECODE_DIR environment variable." unless found
 
       found
     end
