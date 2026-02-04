@@ -6,20 +6,140 @@ module VideoProcessing
     class FileNotFoundError < Error; end
     class ConversionError < Error; end
     class ExecutableNotFoundError < Error; end
+    class FFmpegVersionError < Error; end
 
+    MINIMUM_FFMPEG_VERSION = "8.0"
     DEFAULT_THREADS = 8
     DEFAULT_CRF = 18
     DEFAULT_PRESET = "medium"
     DEFAULT_AUDIO_BITRATE = "192k"
+    DEFAULT_ENCODER = :auto
+    DEFAULT_HW_QUALITY = 65 # Roughly equivalent to CRF 18
+
+    # Encoder configurations by platform
+    HARDWARE_ENCODERS = {
+      macos: {
+        h264_videotoolbox: { codec: "h264_videotoolbox", profile: "high", priority: 1 },
+        hevc_videotoolbox: { codec: "hevc_videotoolbox", profile: "main", priority: 2 }
+      },
+      linux: {
+        h264_nvenc: { codec: "h264_nvenc", profile: "high", priority: 1 },
+        hevc_nvenc: { codec: "hevc_nvenc", profile: "main", priority: 2 },
+        h264_vaapi: { codec: "h264_vaapi", profile: nil, priority: 3 }
+      }
+    }.freeze
+
+    SOFTWARE_ENCODER = { codec: "libx264", profile: nil }.freeze
 
     def initialize
       @braw_decode_path = find_braw_decode
       @braw_decode_dir = find_braw_decode_dir
       @ffmpeg_path = find_executable("ffmpeg")
+      @platform = detect_platform
+      @available_encoders = nil # Lazy-loaded
     end
 
     def available?
       File.executable?(@braw_decode_path) && File.executable?(@ffmpeg_path)
+    end
+
+    # Returns the FFmpeg version as a string (e.g., "8.0.1")
+    def ffmpeg_version
+      @ffmpeg_version ||= begin
+        output, _error, _status = Open3.capture3("#{@ffmpeg_path} -version")
+        # Parse version from line like: "ffmpeg version 8.0.1 Copyright ..."
+        if output =~ /ffmpeg version (\d+\.\d+(?:\.\d+)?)/
+          ::Regexp.last_match(1)
+        end
+      end
+    end
+
+    # Raises FFmpegVersionError if FFmpeg version is below minimum
+    def check_ffmpeg_version!
+      current = ffmpeg_version
+      raise FFmpegVersionError, "Could not determine FFmpeg version" unless current
+
+      if Gem::Version.new(current) < Gem::Version.new(MINIMUM_FFMPEG_VERSION)
+        raise FFmpegVersionError,
+              "FFmpeg #{MINIMUM_FFMPEG_VERSION}+ required (found #{current}). " \
+              "Run: brew upgrade ffmpeg"
+      end
+      true
+    end
+
+    # Detect the current platform
+    def detect_platform
+      case RUBY_PLATFORM
+      when /darwin/
+        :macos
+      when /linux/
+        :linux
+      when /mswin|mingw/
+        :windows
+      else
+        :unknown
+      end
+    end
+
+    # Returns array of available hardware encoder names
+    def available_hw_encoders
+      @available_encoders ||= begin
+        output, _error, _status = Open3.capture3("#{@ffmpeg_path} -encoders")
+        encoders = []
+
+        # Parse encoder list, looking for video encoders (V.....)
+        output.each_line do |line|
+          # Format: " V..... h264_videotoolbox   VideoToolbox H.264 Encoder"
+          if line =~ /^\s*V[\.\w]+\s+(\w+)/
+            encoders << ::Regexp.last_match(1)
+          end
+        end
+
+        encoders
+      end
+    end
+
+    # Returns the best encoder configuration for the current platform
+    # Options:
+    #   encoder: :auto (default), :hardware, :software, or specific encoder name
+    def best_encoder_config(encoder: DEFAULT_ENCODER)
+      case encoder
+      when :software
+        SOFTWARE_ENCODER.merge(type: :software)
+      when :hardware
+        find_hardware_encoder || SOFTWARE_ENCODER.merge(type: :software)
+      when :auto
+        find_hardware_encoder || SOFTWARE_ENCODER.merge(type: :software)
+      when String, Symbol
+        # Specific encoder requested
+        encoder_name = encoder.to_s
+        if available_hw_encoders.include?(encoder_name)
+          platform_encoders = HARDWARE_ENCODERS[@platform] || {}
+          config = platform_encoders[encoder_name.to_sym]
+          if config
+            config.merge(type: :hardware)
+          else
+            { codec: encoder_name, profile: nil, type: :hardware }
+          end
+        elsif encoder_name == "libx264"
+          SOFTWARE_ENCODER.merge(type: :software)
+        else
+          Rails.logger.warn("Encoder '#{encoder_name}' not available, falling back to software")
+          SOFTWARE_ENCODER.merge(type: :software)
+        end
+      else
+        SOFTWARE_ENCODER.merge(type: :software)
+      end
+    end
+
+    # Returns encoder info string for display
+    def encoder_info(encoder: DEFAULT_ENCODER)
+      config = best_encoder_config(encoder: encoder)
+      if config[:type] == :hardware
+        "#{config[:codec]} (hardware)"
+      else
+        "#{config[:codec]} (software/CPU)"
+      end
     end
 
     # Get information about a BRAW file
@@ -58,22 +178,37 @@ module VideoProcessing
     def ffmpeg_params(braw_path)
       raise FileNotFoundError, "BRAW file not found: #{braw_path}" unless File.exist?(braw_path)
 
-      execute_in_braw_dir("#{@braw_decode_path} -f #{Shellwords.escape(braw_path)}").strip
+      # Use absolute path since command runs from braw-decode directory
+      absolute_path = File.absolute_path(braw_path)
+      execute_in_braw_dir("#{@braw_decode_path} -f #{Shellwords.escape(absolute_path)}").strip
     end
 
     # Convert a BRAW file to MP4
     # Returns ConversionResult struct
+    #
+    # Options:
+    #   output_path: custom output path (default: same as input with .mp4 extension)
+    #   threads: number of braw-decode threads (default: 8)
+    #   crf: quality for software encoder (default: 18, lower = better)
+    #   preset: speed preset for software encoder (default: "medium")
+    #   audio_bitrate: audio bitrate (default: "192k")
+    #   encoder: :auto, :hardware, :software, or specific encoder name (default: :auto)
+    #   quality: quality for hardware encoder (default: 65, 1-100, lower = better)
     def convert(braw_path, output_path: nil, threads: DEFAULT_THREADS,
-                crf: DEFAULT_CRF, preset: DEFAULT_PRESET, audio_bitrate: DEFAULT_AUDIO_BITRATE)
+                crf: DEFAULT_CRF, preset: DEFAULT_PRESET, audio_bitrate: DEFAULT_AUDIO_BITRATE,
+                encoder: DEFAULT_ENCODER, quality: DEFAULT_HW_QUALITY)
       raise FileNotFoundError, "BRAW file not found: #{braw_path}" unless File.exist?(braw_path)
 
-      output_path ||= braw_path.sub(/\.braw$/i, ".mp4")
+      # Use absolute paths since commands run from braw-decode directory
+      braw_path = File.absolute_path(braw_path)
+      output_path = File.absolute_path(output_path || braw_path.sub(/\.braw$/i, ".mp4"))
       FileUtils.mkdir_p(File.dirname(output_path))
 
       start_time = Time.current
 
       begin
         ff_params = ffmpeg_params(braw_path)
+        encoder_config = best_encoder_config(encoder: encoder)
 
         # Build the conversion command
         # Must run from braw-decode directory where Libraries folder is located
@@ -84,10 +219,12 @@ module VideoProcessing
           threads: threads,
           crf: crf,
           preset: preset,
-          audio_bitrate: audio_bitrate
+          audio_bitrate: audio_bitrate,
+          encoder_config: encoder_config,
+          quality: quality
         )
 
-        Rails.logger.info("Converting BRAW: #{braw_path}")
+        Rails.logger.info("Converting BRAW: #{braw_path} (encoder: #{encoder_config[:codec]})")
         Rails.logger.debug { "BRAW conversion command: #{cmd}" }
 
         # Execute from the braw-decode directory
@@ -100,7 +237,8 @@ module VideoProcessing
             input_path: braw_path,
             output_path: output_path,
             duration_seconds: nil,
-            error: error.strip
+            error: error.strip,
+            encoder: encoder_config[:codec]
           )
         end
 
@@ -111,7 +249,8 @@ module VideoProcessing
           input_path: braw_path,
           output_path: output_path,
           duration_seconds: elapsed.round(1),
-          error: nil
+          error: nil,
+          encoder: encoder_config[:codec]
         )
       rescue StandardError => e
         ConversionResult.new(
@@ -119,7 +258,8 @@ module VideoProcessing
           input_path: braw_path,
           output_path: output_path,
           duration_seconds: nil,
-          error: e.message
+          error: e.message,
+          encoder: nil
         )
       end
     end
@@ -161,8 +301,8 @@ module VideoProcessing
     def find_braw_decode
       paths = [
         ENV["BRAW_DECODE_PATH"],
-        "/Volumes/stubsdosdos/git/braw-decode",
         File.expand_path("~/git/braw-decode"),
+        "/Volumes/stubsdosdos/git/braw-decode",
         `which braw-decode 2>/dev/null`.strip
       ].compact.reject(&:empty?)
 
@@ -177,8 +317,8 @@ module VideoProcessing
       # Typically this is braw-decode-macOS directory
       paths = [
         ENV["BRAW_DECODE_DIR"],
-        "/Volumes/stubsdosdos/git/braw-decode-macOS",
         File.expand_path("~/git/braw-decode-macOS"),
+        "/Volumes/stubsdosdos/git/braw-decode-macOS",
         File.dirname(@braw_decode_path)
       ].compact.reject(&:empty?)
 
@@ -206,9 +346,18 @@ module VideoProcessing
       output
     end
 
-    def build_conversion_command(braw_path:, output_path:, ff_params:, threads:, crf:, preset:, audio_bitrate:)
+    def build_conversion_command(braw_path:, output_path:, ff_params:, threads:, crf:, preset:,
+                                   audio_bitrate:, encoder_config:, quality:)
       escaped_input = Shellwords.escape(braw_path)
       escaped_output = Shellwords.escape(output_path)
+
+      # Build encoder-specific arguments
+      video_codec_args = build_video_codec_args(
+        encoder_config: encoder_config,
+        crf: crf,
+        preset: preset,
+        quality: quality
+      )
 
       # The command structure:
       # 1. braw-decode pipes raw video to ffmpeg
@@ -221,11 +370,83 @@ module VideoProcessing
         -i #{escaped_input}
         #{ff_params}
         -map 1:v:0 -map 0:a:0
-        -c:v libx264 -preset #{preset} -crf #{crf}
+        #{video_codec_args}
         -c:a aac -b:a #{audio_bitrate}
-        -pix_fmt yuv420p
         #{escaped_output}
       CMD
+    end
+
+    def build_video_codec_args(encoder_config:, crf:, preset:, quality:)
+      codec = encoder_config[:codec]
+
+      case codec
+      when "h264_videotoolbox"
+        # VideoToolbox H.264 encoder
+        # -q:v: Quality (1-100, lower = better quality)
+        # -profile:v high: H.264 High profile for better compatibility
+        # -prio_speed true: Prioritize encoding speed
+        # Note: VideoToolbox handles pixel format conversion internally
+        args = ["-c:v h264_videotoolbox"]
+        args << "-profile:v #{encoder_config[:profile]}" if encoder_config[:profile]
+        args << "-q:v #{quality}"
+        args << "-prio_speed true"
+        args.join(" ")
+
+      when "hevc_videotoolbox"
+        # VideoToolbox HEVC encoder
+        args = ["-c:v hevc_videotoolbox"]
+        args << "-profile:v #{encoder_config[:profile]}" if encoder_config[:profile]
+        args << "-q:v #{quality}"
+        args << "-prio_speed true"
+        args << "-tag:v hvc1" # Better compatibility with QuickTime
+        args.join(" ")
+
+      when "h264_nvenc"
+        # NVIDIA NVENC H.264 encoder
+        # -cq: Constant quality mode (0-51, similar to CRF)
+        args = ["-c:v h264_nvenc"]
+        args << "-profile:v #{encoder_config[:profile]}" if encoder_config[:profile]
+        args << "-preset p4" # Balanced preset
+        args << "-cq #{crf}" # Use CRF-like quality
+        args << "-pix_fmt yuv420p"
+        args.join(" ")
+
+      when "hevc_nvenc"
+        # NVIDIA NVENC HEVC encoder
+        args = ["-c:v hevc_nvenc"]
+        args << "-profile:v #{encoder_config[:profile]}" if encoder_config[:profile]
+        args << "-preset p4"
+        args << "-cq #{crf}"
+        args << "-pix_fmt yuv420p"
+        args.join(" ")
+
+      when "h264_vaapi"
+        # VA-API H.264 encoder (Intel/AMD on Linux)
+        args = ["-c:v h264_vaapi"]
+        args << "-qp #{crf}"
+        args.join(" ")
+
+      else
+        # Software encoder (libx264)
+        args = ["-c:v libx264"]
+        args << "-preset #{preset}"
+        args << "-crf #{crf}"
+        args << "-pix_fmt yuv420p"
+        args.join(" ")
+      end
+    end
+
+    def find_hardware_encoder
+      platform_encoders = HARDWARE_ENCODERS[@platform]
+      return nil unless platform_encoders
+
+      available = available_hw_encoders
+
+      # Find the highest priority available encoder
+      platform_encoders
+        .select { |name, _config| available.include?(name.to_s) }
+        .min_by { |_name, config| config[:priority] }
+        &.then { |name, config| config.merge(name: name, type: :hardware) }
     end
 
     FileInfo = Struct.new(
@@ -234,7 +455,7 @@ module VideoProcessing
     )
 
     ConversionResult = Struct.new(
-      :success, :input_path, :output_path, :duration_seconds, :error,
+      :success, :input_path, :output_path, :duration_seconds, :error, :encoder,
       keyword_init: true
     ) do
       def success?

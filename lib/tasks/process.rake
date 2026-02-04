@@ -526,10 +526,19 @@ namespace :cm do
   end
 
   desc "Convert BRAW files to MP4 in a directory"
-  task :convert_braw, [:folder, :dry_run, :recursive] => :environment do |_t, args|
+  task :convert_braw, [:folder, :dry_run, :recursive, :encoder] => :environment do |_t, args|
     folder = args[:folder]
     dry_run = args[:dry_run] == "true"
     recursive = args[:recursive] == "true"
+    encoder_arg = args[:encoder]
+
+    # Parse encoder option: auto (default), hardware, software, or specific encoder name
+    encoder = case encoder_arg
+              when nil, "", "auto" then :auto
+              when "hardware", "hw" then :hardware
+              when "software", "sw", "cpu" then :software
+              else encoder_arg # specific encoder name like "h264_videotoolbox"
+              end
 
     abort "Usage: rake cm:convert_braw[/path/to/folder] or rake cm:convert_braw[/path/to/folder,true] for dry run" if folder.blank?
     abort "Folder not found: #{folder}" unless Dir.exist?(folder)
@@ -544,11 +553,28 @@ namespace :cm do
       abort "braw-decode or ffmpeg not available. Check BRAW_DECODE_PATH and BRAW_DECODE_DIR environment variables."
     end
 
+    # Check FFmpeg version
+    begin
+      decoder.check_ffmpeg_version!
+    rescue VideoProcessing::BrawDecoder::FFmpegVersionError => e
+      abort "FFmpeg version check failed: #{e.message}"
+    end
+
     puts "Decoder: #{decoder.version}"
+    puts "FFmpeg: #{decoder.ffmpeg_version}"
+    puts "Encoder: #{decoder.encoder_info(encoder: encoder)}"
+    puts "Platform: #{decoder.detect_platform}"
     puts "Folder: #{folder}"
     puts "Recursive: #{recursive}"
     puts "Dry run: #{dry_run}"
     puts ""
+
+    # Show available hardware encoders
+    hw_encoders = decoder.available_hw_encoders.select { |e| e.include?("videotoolbox") || e.include?("nvenc") || e.include?("vaapi") }
+    if hw_encoders.any?
+      puts "Available HW encoders: #{hw_encoders.join(', ')}"
+      puts ""
+    end
 
     unconverted = decoder.find_unconverted(folder, recursive: recursive)
     total_braw = decoder.find_all(folder, recursive: recursive).count
@@ -570,6 +596,7 @@ namespace :cm do
       end
       puts ""
       puts "Run without dry_run to convert: rake cm:convert_braw[#{folder}]"
+      puts "  Options: encoder=auto|hardware|software|h264_videotoolbox|..."
       exit 0
     end
 
@@ -586,11 +613,11 @@ namespace :cm do
       relative = Pathname.new(braw_path).relative_path_from(Pathname.new(folder))
       puts "[#{index + 1}/#{unconverted.count}] Converting: #{relative}"
 
-      result = decoder.convert(braw_path)
+      result = decoder.convert(braw_path, encoder: encoder)
 
       if result.success?
         output_size = number_to_human_size(File.size(result.output_path))
-        puts "  Done: #{File.basename(result.output_path)} (#{output_size}, #{result.duration_seconds}s)"
+        puts "  Done: #{File.basename(result.output_path)} (#{output_size}, #{result.duration_seconds}s, #{result.encoder})"
         success_count += 1
         total_duration += result.duration_seconds
       else
@@ -610,9 +637,18 @@ namespace :cm do
   end
 
   desc "Recursively find and convert all BRAW files to MP4 in a directory tree"
-  task :convert_braw_recursive, [:folder, :dry_run] => :environment do |_t, args|
+  task :convert_braw_recursive, [:folder, :dry_run, :encoder] => :environment do |_t, args|
     folder = args[:folder]
     dry_run = args[:dry_run] == "true"
+    encoder_arg = args[:encoder]
+
+    # Parse encoder option: auto (default), hardware, software, or specific encoder name
+    encoder = case encoder_arg
+              when nil, "", "auto" then :auto
+              when "hardware", "hw" then :hardware
+              when "software", "sw", "cpu" then :software
+              else encoder_arg # specific encoder name like "h264_videotoolbox"
+              end
 
     abort "Usage: rake cm:convert_braw_recursive[/path/to/folder] or rake cm:convert_braw_recursive[/path/to/folder,true] for dry run" if folder.blank?
     abort "Folder not found: #{folder}" unless Dir.exist?(folder)
@@ -627,7 +663,16 @@ namespace :cm do
       abort "braw-decode or ffmpeg not available. Check BRAW_DECODE_PATH and BRAW_DECODE_DIR environment variables."
     end
 
+    # Check FFmpeg version
+    begin
+      decoder.check_ffmpeg_version!
+    rescue VideoProcessing::BrawDecoder::FFmpegVersionError => e
+      abort "FFmpeg version check failed: #{e.message}"
+    end
+
     puts "Decoder: #{decoder.version}"
+    puts "FFmpeg: #{decoder.ffmpeg_version}"
+    puts "Encoder: #{decoder.encoder_info(encoder: encoder)}"
     puts "Root folder: #{folder}"
     puts "Dry run: #{dry_run}"
     puts ""
@@ -661,6 +706,7 @@ namespace :cm do
       end
       puts ""
       puts "Run without dry_run to convert: rake cm:convert_braw_recursive[#{folder}]"
+      puts "  Options: encoder=auto|hardware|software|h264_videotoolbox|..."
       exit 0
     end
 
@@ -677,11 +723,11 @@ namespace :cm do
       relative = Pathname.new(braw_path).relative_path_from(Pathname.new(folder))
       puts "[#{index + 1}/#{unconverted.count}] #{relative}"
 
-      result = decoder.convert(braw_path)
+      result = decoder.convert(braw_path, encoder: encoder)
 
       if result.success?
         output_size = number_to_human_size(File.size(result.output_path))
-        puts "  -> #{File.basename(result.output_path)} (#{output_size}, #{result.duration_seconds}s)"
+        puts "  -> #{File.basename(result.output_path)} (#{output_size}, #{result.duration_seconds}s, #{result.encoder})"
         success_count += 1
         total_duration += result.duration_seconds
       else
