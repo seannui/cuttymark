@@ -609,6 +609,97 @@ namespace :cm do
     puts ""
   end
 
+  desc "Recursively find and convert all BRAW files to MP4 in a directory tree"
+  task :convert_braw_recursive, [:folder, :dry_run] => :environment do |_t, args|
+    folder = args[:folder]
+    dry_run = args[:dry_run] == "true"
+
+    abort "Usage: rake cm:convert_braw_recursive[/path/to/folder] or rake cm:convert_braw_recursive[/path/to/folder,true] for dry run" if folder.blank?
+    abort "Folder not found: #{folder}" unless Dir.exist?(folder)
+
+    puts "=" * 60
+    puts "BRAW to MP4 Recursive Conversion"
+    puts "=" * 60
+    puts ""
+
+    decoder = VideoProcessing::BrawDecoder.new
+    unless decoder.available?
+      abort "braw-decode or ffmpeg not available. Check BRAW_DECODE_PATH and BRAW_DECODE_DIR environment variables."
+    end
+
+    puts "Decoder: #{decoder.version}"
+    puts "Root folder: #{folder}"
+    puts "Dry run: #{dry_run}"
+    puts ""
+
+    puts "Scanning for BRAW files..."
+    unconverted = decoder.find_unconverted(folder, recursive: true)
+    total_braw = decoder.find_all(folder, recursive: true).count
+
+    puts "Found #{total_braw} total BRAW files"
+    puts "  Already converted: #{total_braw - unconverted.count}"
+    puts "  Need conversion: #{unconverted.count}"
+    puts ""
+
+    if unconverted.empty?
+      puts "Nothing to convert!"
+      exit 0
+    end
+
+    # Group by directory for better output
+    by_directory = unconverted.group_by { |f| File.dirname(f) }
+
+    if dry_run
+      puts "Files to convert:"
+      by_directory.each do |dir, files|
+        relative_dir = Pathname.new(dir).relative_path_from(Pathname.new(folder))
+        puts "  #{relative_dir}/"
+        files.each do |braw_path|
+          size = number_to_human_size(File.size(braw_path))
+          puts "    - #{File.basename(braw_path)} (#{size})"
+        end
+      end
+      puts ""
+      puts "Run without dry_run to convert: rake cm:convert_braw_recursive[#{folder}]"
+      exit 0
+    end
+
+    puts "-" * 60
+    puts "Converting #{unconverted.count} files..."
+    puts "-" * 60
+    puts ""
+
+    success_count = 0
+    fail_count = 0
+    total_duration = 0
+
+    unconverted.each_with_index do |braw_path, index|
+      relative = Pathname.new(braw_path).relative_path_from(Pathname.new(folder))
+      puts "[#{index + 1}/#{unconverted.count}] #{relative}"
+
+      result = decoder.convert(braw_path)
+
+      if result.success?
+        output_size = number_to_human_size(File.size(result.output_path))
+        puts "  -> #{File.basename(result.output_path)} (#{output_size}, #{result.duration_seconds}s)"
+        success_count += 1
+        total_duration += result.duration_seconds
+      else
+        puts "  FAILED: #{result.error}"
+        fail_count += 1
+      end
+    end
+
+    puts ""
+    puts "=" * 60
+    puts "Conversion Complete"
+    puts "=" * 60
+    puts "  Succeeded: #{success_count}"
+    puts "  Failed: #{fail_count}"
+    puts "  Total time: #{format_duration(total_duration)}"
+    puts ""
+  end
+
   desc "Clean up broken words in transcripts using LLM"
   task :cleanup_text, [:transcript_id] => :environment do |_t, args|
     transcript_id = args[:transcript_id]
