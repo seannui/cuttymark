@@ -15,6 +15,7 @@ module VideoProcessing
     DEFAULT_AUDIO_BITRATE = "192k"
     DEFAULT_ENCODER = :auto
     DEFAULT_HW_QUALITY = 65 # Roughly equivalent to CRF 18
+    MAX_OUTPUT_WIDTH = 3840 # Scale down to 4K if source is larger
 
     # Encoder configurations by platform
     HARDWARE_ENCODERS = {
@@ -208,6 +209,16 @@ module VideoProcessing
 
       begin
         ff_params = ffmpeg_params(braw_path)
+
+        # Parse resolution from ff_params to check if we need to scale down
+        # ff_params looks like: -f rawvideo -pixel_format rgba -s 6144x3456 -r 24 -i pipe:0
+        video_width = ff_params =~ /-s\s+(\d+)x\d+/ ? ::Regexp.last_match(1).to_i : 0
+        needs_scale = video_width > MAX_OUTPUT_WIDTH
+
+        if needs_scale
+          Rails.logger.info("Resolution #{video_width}px exceeds #{MAX_OUTPUT_WIDTH}px, will scale to 4K")
+        end
+
         encoder_config = best_encoder_config(encoder: encoder)
 
         # Build the conversion command
@@ -221,10 +232,12 @@ module VideoProcessing
           preset: preset,
           audio_bitrate: audio_bitrate,
           encoder_config: encoder_config,
-          quality: quality
+          quality: quality,
+          scale_to_4k: needs_scale
         )
 
-        Rails.logger.info("Converting BRAW: #{braw_path} (encoder: #{encoder_config[:codec]})")
+        scale_info = needs_scale ? ", scaling to 4K" : ""
+        Rails.logger.info("Converting BRAW: #{braw_path} (encoder: #{encoder_config[:codec]}#{scale_info})")
         Rails.logger.debug { "BRAW conversion command: #{cmd}" }
 
         # Execute from the braw-decode directory
@@ -232,6 +245,8 @@ module VideoProcessing
 
         unless status.success?
           Rails.logger.error("BRAW conversion failed: #{error}")
+          # Clean up failed output file to avoid leaving invalid files
+          cleanup_failed_output(output_path)
           return ConversionResult.new(
             success: false,
             input_path: braw_path,
@@ -253,6 +268,8 @@ module VideoProcessing
           encoder: encoder_config[:codec]
         )
       rescue StandardError => e
+        # Clean up failed output file to avoid leaving invalid files
+        cleanup_failed_output(output_path)
         ConversionResult.new(
           success: false,
           input_path: braw_path,
@@ -297,6 +314,20 @@ module VideoProcessing
     end
 
     private
+
+    # Remove invalid/incomplete output files after failed conversion
+    def cleanup_failed_output(output_path)
+      return unless output_path && File.exist?(output_path)
+
+      # Only delete if file is empty or very small (likely incomplete)
+      file_size = File.size(output_path)
+      if file_size < 1024 # Less than 1KB is definitely invalid
+        Rails.logger.info("Cleaning up failed output file: #{output_path} (#{file_size} bytes)")
+        FileUtils.rm_f(output_path)
+      end
+    rescue StandardError => e
+      Rails.logger.warn("Failed to clean up output file #{output_path}: #{e.message}")
+    end
 
     def find_braw_decode
       paths = [
@@ -347,7 +378,7 @@ module VideoProcessing
     end
 
     def build_conversion_command(braw_path:, output_path:, ff_params:, threads:, crf:, preset:,
-                                   audio_bitrate:, encoder_config:, quality:)
+                                   audio_bitrate:, encoder_config:, quality:, scale_to_4k: false)
       escaped_input = Shellwords.escape(braw_path)
       escaped_output = Shellwords.escape(output_path)
 
@@ -358,6 +389,10 @@ module VideoProcessing
         preset: preset,
         quality: quality
       )
+
+      # Scale filter for resolutions larger than 4K
+      # Using lanczos for high quality downscaling, -2 ensures height is divisible by 2
+      scale_filter = scale_to_4k ? "-vf scale=#{MAX_OUTPUT_WIDTH}:-2:flags=lanczos" : ""
 
       # The command structure:
       # 1. braw-decode pipes raw video to ffmpeg
@@ -370,6 +405,7 @@ module VideoProcessing
         -i #{escaped_input}
         #{ff_params}
         -map 1:v:0 -map 0:a:0
+        #{scale_filter}
         #{video_codec_args}
         -c:a aac -b:a #{audio_bitrate}
         #{escaped_output}
@@ -385,8 +421,10 @@ module VideoProcessing
         # -q:v: Quality (1-100, lower = better quality)
         # -profile:v high: H.264 High profile for better compatibility
         # -prio_speed true: Prioritize encoding speed
+        # -allow_sw 1: Allow software fallback for resolutions exceeding HW limits (e.g., 6K)
         # Note: VideoToolbox handles pixel format conversion internally
         args = ["-c:v h264_videotoolbox"]
+        args << "-allow_sw 1" # Fallback to software for large resolutions like 6K
         args << "-profile:v #{encoder_config[:profile]}" if encoder_config[:profile]
         args << "-q:v #{quality}"
         args << "-prio_speed true"
@@ -394,7 +432,10 @@ module VideoProcessing
 
       when "hevc_videotoolbox"
         # VideoToolbox HEVC encoder
+        # HEVC supports larger resolutions in hardware than H.264
+        # -allow_sw 1: Still allow software fallback for edge cases
         args = ["-c:v hevc_videotoolbox"]
+        args << "-allow_sw 1" # Fallback to software for edge cases
         args << "-profile:v #{encoder_config[:profile]}" if encoder_config[:profile]
         args << "-q:v #{quality}"
         args << "-prio_speed true"
