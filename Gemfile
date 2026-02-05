@@ -41,6 +41,9 @@ gem "aasm"
 # Pagination
 gem "kaminari"
 
+# CSV support (will be removed from stdlib in Ruby 3.4)
+gem "csv"
+
 # Reduces boot times through caching; required in config/boot.rb
 gem "bootsnap", require: false
 

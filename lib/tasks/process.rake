@@ -749,9 +749,9 @@ namespace :cm do
   desc "Clean up broken words in transcripts using LLM"
   task :cleanup_text, [:transcript_id] => :environment do |_t, args|
     transcript_id = args[:transcript_id]
-    
+
     service = Transcription::TextCleanupService.new
-    
+
     if transcript_id.present?
       transcript = Transcript.find(transcript_id)
       puts "Cleaning transcript #{transcript.id} for video #{transcript.video_id}..."
@@ -770,5 +770,139 @@ namespace :cm do
           puts "  Cleaned #{count} segments"
         end
     end
+  end
+
+  desc "Scan directory for MP4 files and export metadata to CSV"
+  task :scan_mp4, [:directory] => :environment do |_t, args|
+    require "csv"
+    require "open3"
+
+    directory = args[:directory]
+    abort "Usage: rake cm:scan_mp4[/path/to/directory]" if directory.blank?
+    abort "Directory not found: #{directory}" unless Dir.exist?(directory)
+
+    puts "=" * 60
+    puts "MP4 File Scanner"
+    puts "=" * 60
+    puts ""
+    puts "Scanning: #{directory}"
+    puts ""
+
+    # Find all MP4 files recursively
+    mp4_files = Dir.glob(File.join(directory, "**", "*.mp4"), File::FNM_CASEFOLD).sort
+    puts "Found #{mp4_files.count} MP4 files"
+    puts ""
+
+    if mp4_files.empty?
+      puts "No MP4 files found."
+      exit 0
+    end
+
+    # Generate output filename with timestamp
+    timestamp = Time.current.strftime("%Y%m%d_%H%M%S")
+    output_path = Rails.root.join("tmp", "mp4_scan_#{timestamp}.csv")
+
+    # Find ffprobe
+    ffprobe_path = [
+      "/opt/homebrew/bin/ffprobe",
+      "/usr/local/bin/ffprobe",
+      "/usr/bin/ffprobe",
+      `which ffprobe 2>/dev/null`.strip
+    ].find { |p| File.executable?(p) }
+
+    abort "ffprobe not found. Install FFmpeg: brew install ffmpeg" unless ffprobe_path
+
+    puts "Using ffprobe: #{ffprobe_path}"
+    puts "Output: #{output_path}"
+    puts ""
+    puts "-" * 60
+
+    success_count = 0
+    error_count = 0
+
+    CSV.open(output_path, "w") do |csv|
+      csv << ["path", "name", "duration", "duration_seconds", "resolution", "file_size", "size_mb"]
+
+      mp4_files.each_with_index do |file_path, index|
+        print "\r[#{index + 1}/#{mp4_files.count}] Scanning..."
+
+        begin
+          # Get file info
+          file_name = File.basename(file_path)
+          file_size = File.size(file_path)
+          size_mb = (file_size / 1_048_576.0).round(2)
+
+          # Get video metadata using ffprobe
+          cmd = "#{Shellwords.escape(ffprobe_path)} -v error " \
+                "-select_streams v:0 " \
+                "-show_entries stream=width,height,duration " \
+                "-show_entries format=duration " \
+                "-of csv=p=0:s=x #{Shellwords.escape(file_path)}"
+
+          output, _error, status = Open3.capture3(cmd)
+
+          duration = nil
+          resolution = nil
+
+          if status.success? && output.present?
+            lines = output.strip.split("\n")
+
+            # Parse stream info (width x height x stream_duration)
+            if lines[0].present?
+              parts = lines[0].split("x")
+              if parts.size >= 2
+                width = parts[0].to_i
+                height = parts[1].to_i
+                resolution = "#{width}x#{height}" if width > 0 && height > 0
+                # Stream duration might be in parts[2]
+                duration = parts[2].to_f if parts[2].present? && parts[2].to_f > 0
+              end
+            end
+
+            # Parse format duration (more reliable)
+            if lines[1].present? && lines[1].to_f > 0
+              duration = lines[1].to_f
+            end
+          end
+
+          # Duration in seconds with 2 decimal places
+          duration_seconds = duration ? duration.round(2) : nil
+
+          # Format duration as HH:MM:SS
+          duration_formatted = if duration && duration > 0
+                                 hours = (duration / 3600).to_i
+                                 minutes = ((duration % 3600) / 60).to_i
+                                 seconds = (duration % 60).to_i
+                                 if hours > 0
+                                   format("%d:%02d:%02d", hours, minutes, seconds)
+                                 else
+                                   format("%d:%02d", minutes, seconds)
+                                 end
+                               else
+                                 "unknown"
+                               end
+
+          # Format file size
+          file_size_formatted = number_to_human_size(file_size)
+
+          csv << [file_path, file_name, duration_formatted, duration_seconds, resolution || "unknown", file_size_formatted, size_mb]
+          success_count += 1
+        rescue => e
+          csv << [file_path, File.basename(file_path), "error", nil, "error", "error", nil]
+          error_count += 1
+          $stderr.puts "\nError processing #{file_path}: #{e.message}"
+        end
+      end
+    end
+
+    puts "\r" + " " * 40
+    puts ""
+    puts "=" * 60
+    puts "Scan Complete"
+    puts "=" * 60
+    puts "  Scanned: #{success_count}"
+    puts "  Errors: #{error_count}"
+    puts "  Output: #{output_path}"
+    puts ""
   end
 end
