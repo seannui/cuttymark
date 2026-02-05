@@ -10,242 +10,147 @@ Cuttymark is a Rails application for analyzing video files, matching spoken cont
 - **Multiple Export Formats**: FFmpeg commands, Adobe Premiere XML, Final Cut Pro FCPXML
 - **Non-destructive**: Source videos are never modified
 
-## System Requirements
+## Quick Start
 
-- **macOS** (tested on Apple Silicon M3 Max)
-- **Ruby 3.3+** (check `.ruby-version`)
-- **Rails 8.1+**
-- **PostgreSQL 17** with pgvector extension
-- **FFmpeg** for video/audio processing
-- **Whisper.cpp** for local transcription
-- **Ollama** for local embeddings
-
-## Installation
-
-### 1. Clone the Repository
+See **[INSTALL.md](INSTALL.md)** for detailed installation instructions.
 
 ```bash
-git clone https://github.com/seannui/cuttymark.git
-cd cuttymark
-```
-
-### 2. Install Ruby Dependencies
-
-```bash
-bundle install
-```
-
-### 3. Install PostgreSQL 17 with pgvector
-
-If you don't have PostgreSQL 17 installed:
-
-```bash
-brew install postgresql@17
-brew services start postgresql@17
-```
-
-Install the pgvector extension:
-
-```bash
-brew install pgvector
-```
-
-Create the database and enable pgvector:
-
-```bash
-createdb cuttymark_development
-psql cuttymark_development -c "CREATE EXTENSION IF NOT EXISTS vector;"
-```
-
-### 4. Install FFmpeg
-
-```bash
-brew install ffmpeg
-```
-
-Verify installation:
-
-```bash
-ffmpeg -version
-```
-
-### 5. Install Whisper.cpp
-
-Clone and build whisper.cpp:
-
-```bash
-cd ~/git  # or your preferred directory
-git clone https://github.com/ggerganov/whisper.cpp.git
-cd whisper.cpp
-make
-
-# Download the large-v3 model (recommended for accuracy)
-./models/download-ggml-model.sh large-v3
-```
-
-Build the server:
-
-```bash
-mkdir -p build && cd build
-cmake ..
-make whisper-server
-```
-
-The whisper server will be started via `Procfile.dev`.
-
-### 6. Install Ollama
-
-```bash
-brew install ollama
-```
-
-Start Ollama and pull the embedding model:
-
-```bash
-ollama serve  # Run in background or separate terminal
-ollama pull nomic-embed-text
-```
-
-Verify the model is available:
-
-```bash
-ollama list
-```
-
-You should see `nomic-embed-text` in the list.
-
-### 7. (Optional) Configure Gemini API
-
-As an alternative to local Whisper transcription, you can use Google's Gemini API for cloud-based transcription. Gemini offers:
-
-- **Speaker diarization** (automatic speaker labels)
-- **No local GPU required**
-- **Fast processing** via cloud infrastructure
-- **Low cost** (~$0.02 for a 1.5 hour video with Gemini Flash)
-
-To use Gemini:
-
-1. Get an API key from [Google AI Studio](https://aistudio.google.com/app/apikey)
-
-2. Set the environment variable:
-
-```bash
-export GEMINI_API_KEY=your_api_key_here
-```
-
-3. (Optional) Set Gemini as the default transcription engine:
-
-```bash
-export TRANSCRIPTION_ENGINE=gemini
-```
-
-4. (Optional) Choose a specific model:
-
-```bash
-# Options: gemini-2.0-flash (default, fast/cheap), gemini-1.5-pro (higher quality)
-export GEMINI_MODEL=gemini-2.0-flash
-```
-
-**Note:** For audio files over 20MB, the Gemini client automatically uses the File API for upload.
-
-### 8. Configure the Database
-
-Update `config/database.yml` if needed, then:
-
-```bash
-bin/rails db:create
-bin/rails db:migrate
-```
-
-### 9. Start the Application
-
-```bash
+# After installation, start the app
 bin/dev
-```
 
-This starts:
-- Rails server on port 3000
-- Whisper server on port 3333
+# Process a video file
+rake cm:process[/path/to/video.mp4]
+```
 
 Visit `http://localhost:3000`
-
----
-
-## Blackmagic RAW (.braw) File Support
-
-FFmpeg cannot natively read `.braw` files. You have several options:
-
-### Option A: DaVinci Resolve (Recommended)
-
-The simplest and most reliable approach:
-
-1. Download [DaVinci Resolve](https://www.blackmagicdesign.com/products/davinciresolve) (free version)
-2. Import your `.braw` files
-3. Export as ProRes 422 or H.264 MP4 (4K recommended)
-4. Import the converted files into Cuttymark
-
-### Option B: Brawtool (Command Line)
-
-[Brawtool](https://github.com/mikaelsundell/brawtool) is a command-line utility for extracting frames from `.braw` files on macOS.
-
-#### Prerequisites
-
-```bash
-brew install cmake boost openimageio opencolorio
-```
-
-#### Download Blackmagic RAW SDK
-
-1. Visit the [Blackmagic RAW](https://www.blackmagicdesign.com/products/blackmagicraw) page
-2. Click "Download Blackmagic RAW SDK" and select "Mac OS X"
-3. Install the SDK
-
-#### Build Brawtool
-
-```bash
-cd ~/git
-git clone https://github.com/mikaelsundell/brawtool.git
-cd brawtool
-mkdir build && cd build
-
-# For Apple Silicon (M1/M2/M3)
-cmake .. -DCMAKE_BUILD_TYPE=Release
-cmake --build . --config Release -j 8
-```
-
-#### Usage Example
-
-Extract frames and convert to MP4 via FFmpeg:
-
-```bash
-# Extract all frames as PNG
-brawtool --outputdirectory ./frames --outputformat png input.braw
-
-# Combine frames into video with FFmpeg
-ffmpeg -framerate 24 -i frames/frame_%04d.png -c:v libx264 -crf 18 output.mp4
-```
-
-### Option C: braw-decode (Linux Only)
-
-[braw-decode](https://github.com/AkBKukU/braw-decode) is a headless decoder that pipes directly to FFmpeg. Currently only supports Linux.
-
----
 
 ## Project Structure
 
 ```
 storage/
-├── sources/     # Original video files (read-only references)
+├── sources/     # Default location for source videos (configurable via CUTTYMARK_SOURCES_PATH)
 ├── proxies/     # Converted proxy files (4K MP4)
 ├── audio/       # Extracted audio for transcription
 └── exports/     # Rendered clip outputs
 ```
 
+Source videos can be stored on an external drive by setting `CUTTYMARK_SOURCES_PATH` in your `.env` file.
+
+## Rake Tasks
+
+Cuttymark provides custom rake tasks for setup, content ingestion, and processing. All tasks are in the `cm:` namespace.
+
+### Video Processing
+
+| Task | Description |
+|------|-------------|
+| `cm:process[path,project]` | Process a single video through the full pipeline (import, transcribe, embed) |
+| `cm:process_all[project,include_braw]` | Process all unprocessed videos in sources directory (BRAW skipped by default) |
+| `cm:reprocess[video_id,engine]` | Re-transcribe and re-embed a single video |
+| `cm:reprocess_all[project]` | Reprocess all videos from scratch |
+| `cm:retry[video_id]` | Retry a failed video |
+
+**Examples:**
+```bash
+# Process a single video
+rake cm:process[/path/to/video.mp4]
+rake cm:process[/path/to/video.mp4,"My Project"]
+
+# Process all videos in sources directory (skips .braw files)
+rake cm:process_all
+rake cm:process_all["My Project"]
+
+# Include BRAW files in processing
+rake cm:process_all["My Project",true]
+
+# Reprocess with a specific engine
+rake cm:reprocess[123,gemini]
+```
+
+### BRAW Conversion
+
+| Task | Description |
+|------|-------------|
+| `cm:convert_braw[folder,dry_run,recursive,encoder]` | Convert BRAW files to MP4 |
+| `cm:convert_braw_recursive[folder,dry_run,encoder]` | Recursively convert all BRAW files |
+
+**Examples:**
+```bash
+# Dry run (preview what would be converted)
+rake cm:convert_braw[/path/to/folder,true]
+
+# Convert with hardware encoding (default)
+rake cm:convert_braw[/path/to/folder]
+
+# Recursive conversion
+rake cm:convert_braw[/path/to/folder,false,true]
+
+# Force software encoding
+rake cm:convert_braw[/path/to/folder,false,false,software]
+```
+
+For detailed BRAW setup instructions, see **[doc/braw_to_mp4_conversion.md](doc/braw_to_mp4_conversion.md)**.
+
+### Job Management
+
+| Task | Description |
+|------|-------------|
+| `cm:jobs:status` | Show job queue status |
+| `cm:jobs:clear` | Clear pending jobs (keeps completed/failed) |
+| `cm:jobs:clear_all` | Clear all jobs including completed |
+| `cm:jobs:clear_failed` | Clear failed jobs |
+| `cm:jobs:retry_failed` | Retry all failed jobs |
+| `cm:wait_for_jobs` | Wait for all processing jobs to complete |
+
+**Examples:**
+```bash
+# Check queue status
+rake cm:jobs:status
+
+# Retry all failed jobs
+rake cm:jobs:retry_failed
+
+# Wait for batch processing to complete
+rake cm:wait_for_jobs
+```
+
+### Transcript Maintenance
+
+| Task | Description |
+|------|-------------|
+| `cm:search[video_id,query]` | Search a video transcript for a phrase |
+| `cm:clean_hallucinations[video_id]` | Remove hallucinated segments from transcript |
+| `cm:cleanup_text[transcript_id]` | Clean up broken words using LLM |
+
+**Examples:**
+```bash
+# Search for a phrase in a video
+rake cm:search[123,"climate change"]
+
+# Clean hallucinations from a transcript
+rake cm:clean_hallucinations[123]
+```
+
+### Utilities
+
+| Task | Description |
+|------|-------------|
+| `cm:scan_mp4[directory]` | Scan directory for MP4 files and export metadata to CSV |
+
+**Example:**
+```bash
+rake cm:scan_mp4[/Volumes/drive/footage]
+# Output: tmp/mp4_scan_20260205_123456.csv
+```
+
 ## Configuration
 
-Create a `.env` file for local configuration:
+Create a `.env` file for local configuration (see `.env.example`):
 
 ```bash
+# Source video directory (default: storage/sources)
+CUTTYMARK_SOURCES_PATH=/Volumes/ExternalDrive/footage
+
 # Whisper server
 WHISPER_HOST=127.0.0.1
 WHISPER_PORT=3333
@@ -254,9 +159,6 @@ WHISPER_PORT=3333
 OLLAMA_HOST=127.0.0.1
 OLLAMA_PORT=11434
 OLLAMA_EMBED_MODEL=nomic-embed-text
-
-# Storage paths (defaults to storage/ in Rails root)
-CUTTYMARK_STORAGE_PATH=storage
 ```
 
 ## Running Tests
@@ -280,6 +182,7 @@ The development Procfile starts all required services:
 ```
 web: bin/rails server -p 3000
 whisper: /path/to/whisper.cpp/build/bin/whisper-server -m /path/to/models/ggml-large-v3.bin --host 127.0.0.1 --port 3333 -t 16 -p 8 --convert
+jobs: bin/rails solid_queue:start
 ```
 
 Update the whisper path to match your installation.
@@ -291,51 +194,7 @@ Cuttymark uses Solid Queue for background job processing. Jobs include:
 - Embedding generation
 - Clip rendering
 
-## Troubleshooting
-
-### pgvector extension not found
-
-```bash
-# Ensure pgvector is installed
-brew install pgvector
-
-# Connect to your database and enable it
-psql cuttymark_development -c "CREATE EXTENSION IF NOT EXISTS vector;"
-```
-
-### Whisper server connection refused
-
-Ensure the whisper server is running:
-
-```bash
-# Check if port 3333 is in use
-lsof -i :3333
-
-# Start manually if needed
-/path/to/whisper.cpp/build/bin/whisper-server \
-  -m /path/to/models/ggml-large-v3.bin \
-  --host 127.0.0.1 --port 3333 -t 16 -p 8 --convert
-```
-
-### Ollama model not found
-
-```bash
-# Ensure Ollama is running
-ollama serve
-
-# Pull the model
-ollama pull nomic-embed-text
-
-# Verify
-ollama list
-```
-
-### FFmpeg not finding codecs
-
-```bash
-# Reinstall with all codecs
-brew reinstall ffmpeg
-```
+Monitor jobs at: `http://localhost:3000/jobs`
 
 ## License
 

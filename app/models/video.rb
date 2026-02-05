@@ -172,16 +172,27 @@ class Video < ApplicationRecord
 
   # Class methods for batch operations
   class << self
+    # Get the configured sources directory path
+    # Reads from CUTTYMARK_SOURCES_PATH env var, falls back to storage/sources
+    def sources_dir
+      if ENV["CUTTYMARK_SOURCES_PATH"].present?
+        Pathname.new(ENV["CUTTYMARK_SOURCES_PATH"])
+      else
+        Rails.root.join("storage", "sources")
+      end
+    end
+
     # Find all videos needing processing
     # Returns hash with :new_files, :pending, :failed arrays
-    def needing_processing(sources_dir: nil)
-      sources_dir ||= Rails.root.join("storage", "sources")
+    # Set include_braw: true to include .braw files (skipped by default)
+    def needing_processing(sources_dir: nil, include_braw: false)
+      sources_dir ||= self.sources_dir
 
       # Get already imported paths
       imported_paths = pluck(:source_path).to_set
 
       # Find new files not yet imported
-      extensions = SUPPORTED_FORMATS + [BRAW_FORMAT]
+      extensions = include_braw ? SUPPORTED_FORMATS + [BRAW_FORMAT] : SUPPORTED_FORMATS
       pattern = File.join(sources_dir, "**", "*.{#{extensions.join(',')}}")
       all_files = Dir.glob(pattern, File::FNM_CASEFOLD).sort
       new_files = all_files.reject { |path| imported_paths.include?(path) }
@@ -233,8 +244,8 @@ class Video < ApplicationRecord
 
     # Queue jobs for all videos needing processing
     # Returns hash with counts of queued jobs by type
-    def queue_all_needing_processing!(project:, sources_dir: nil)
-      work = needing_processing(sources_dir: sources_dir)
+    def queue_all_needing_processing!(project:, sources_dir: nil, include_braw: false)
+      work = needing_processing(sources_dir: sources_dir, include_braw: include_braw)
       counts = { new_files: 0, pending: 0, failed: 0 }
 
       # Queue new file imports

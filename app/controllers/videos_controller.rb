@@ -77,7 +77,7 @@ class VideosController < ApplicationController
   private
 
   def scan_source_files
-    sources_dir = Rails.root.join("storage", "sources")
+    sources_dir = Video.sources_dir
     return [] unless Dir.exist?(sources_dir)
 
     # Get already imported source paths

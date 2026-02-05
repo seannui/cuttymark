@@ -110,10 +110,11 @@ namespace :cm do
     puts ""
   end
 
-  desc "Process all unprocessed video files in storage/sources (includes retrying failed)"
-  task :process_all, [:project_name] => :environment do |_t, args|
+  desc "Process all unprocessed video files in sources directory (includes retrying failed). BRAW files skipped by default."
+  task :process_all, [:project_name, :include_braw] => :environment do |_t, args|
     project_name = args[:project_name] || "Default Project"
-    sources_dir = Rails.root.join("storage", "sources")
+    include_braw = args[:include_braw] == "true"
+    sources_dir = Video.sources_dir
 
     puts "=" * 60
     puts "Cuttymark Batch Processing"
@@ -124,6 +125,7 @@ namespace :cm do
       p.description = "Created by cm:process_all task"
     end
     puts "Project: #{project.name} (ID: #{project.id})"
+    puts "Include BRAW: #{include_braw}"
     puts ""
 
     unless Dir.exist?(sources_dir)
@@ -131,7 +133,7 @@ namespace :cm do
     end
 
     # Find all videos needing processing (for reporting)
-    work = Video.needing_processing(sources_dir: sources_dir)
+    work = Video.needing_processing(sources_dir: sources_dir, include_braw: include_braw)
     new_files = work[:new_files]
     pending_videos = work[:pending]
     failed_videos = work[:failed]
@@ -187,7 +189,7 @@ namespace :cm do
     puts "-" * 60
     puts ""
 
-    counts = Video.queue_all_needing_processing!(project: project, sources_dir: sources_dir) do |type, item|
+    counts = Video.queue_all_needing_processing!(project: project, sources_dir: sources_dir, include_braw: include_braw) do |type, item|
       case type
       when :new
         relative = Pathname.new(item).relative_path_from(sources_dir)

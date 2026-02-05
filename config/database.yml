@@ -22,10 +22,10 @@ default_postgres: &default_postgres
 development:
   primary:
     <<: *default_postgres
-    database: cuttymark_development
+    database: <%= ENV.fetch("DATABASE_NAME", "cuttymark_development") %>
   queue:
     <<: *default_sqlite
-    database: storage/development_queue.sqlite3
+    database: <%= ENV.fetch("DATABASE_QUEUE_PATH", "storage/development_queue.sqlite3") %>
     migrations_paths: db/queue_migrate
 
 test:
