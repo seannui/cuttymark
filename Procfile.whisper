@@ -1,0 +1,1 @@
+whisper: ${WHISPER_SERVER_PATH:-/Users/sporter/git/whisper.cpp/build/bin/whisper-server} -m ${WHISPER_MODEL_PATH:-/Users/sporter/git/whisper.cpp/models/ggml-large-v3.bin} --host ${WHISPER_HOST:-127.0.0.1} --port ${WHISPER_PORT:-3333} -t 16 -p 8 --convert 2>&1 | tee -a log/whisper.log
