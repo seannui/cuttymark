@@ -24,6 +24,14 @@ Cuttymark is a Rails app for analyzing video files, matching to a current phrase
 - Deployment and DevOps practices
 - yarn is used to managed javascript dependencies
 
+## Page titles
+
+- Every non-partial view must include a `content_for(:title)` block at the top of the file
+- Pattern: `<% content_for(:title) { "Page Context" } %>`
+- Do NOT include the app name — the layout appends `| Cuttymark` automatically
+- Use context-specific titles (e.g., show pages should include the record name, index pages should include the resource name)
+- The layout falls back to "Cuttymark" if no title is set
+
 ## When working on Rails projects:
 
 - Follow Rails conventions and the "Rails Way"

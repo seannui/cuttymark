@@ -1,0 +1,31 @@
+<% video = match[:video] %>
+<% segment = match[:segment] %>
+<% similarity = match[:similarity] %>
+<li class="p-6 hover:bg-gray-50">
+  <div class="flex items-start justify-between">
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center space-x-3 mb-2">
+        <%= link_to video.filename, video_path(video), class: "text-sm font-medium text-indigo-600 hover:text-indigo-900", data: { turbo_frame: "_top" } %>
+        <% if segment %>
+          <span class="text-sm text-gray-500 font-mono"><%= segment.time_range_formatted %></span>
+        <% end %>
+        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium <%= similarity >= 0.6 ? 'bg-green-100 text-green-800' : similarity >= 0.45 ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-600' %>">
+          <%= number_to_percentage(similarity * 100, precision: 0) %> match
+        </span>
+      </div>
+      <p class="text-sm text-gray-900 bg-gray-50 rounded p-3 break-words">
+        <%= transcript_excerpt(match[:text], @filter_query) %>
+      </p>
+      <div class="mt-2 flex items-center space-x-3 text-xs text-gray-500">
+        <span><%= video.project.name %></span>
+        <span>&middot;</span>
+        <span><%= video.duration_formatted || "-" %></span>
+        <span>&middot;</span>
+        <span><%= video.file_size_formatted %></span>
+      </div>
+    </div>
+    <div class="ml-4 flex-shrink-0">
+      <%= link_to "View", video_path(video), class: "inline-flex items-center px-3 py-1.5 border border-gray-300 text-xs font-medium rounded text-gray-700 bg-white hover:bg-gray-50", data: { turbo_frame: "_top" } %>
+    </div>
+  </div>
+</li>

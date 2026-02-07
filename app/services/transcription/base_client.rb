@@ -20,5 +20,9 @@ module Transcription
     def engine_name
       raise NotImplementedError, "#{self.class} must implement #engine_name"
     end
+
+    def model_name
+      nil
+    end
   end
 end

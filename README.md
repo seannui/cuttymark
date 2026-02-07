@@ -175,17 +175,25 @@ RAILS_TEST_WORKERS=1 bin/rails test
 
 ## Development
 
-### Procfile.dev
+### Procfiles
 
-The development Procfile starts all required services:
+Several Procfiles are available depending on your setup:
 
+| Procfile | Description |
+|----------|-------------|
+| `Procfile.dev` | Full local development (postgres, web, jobs, whisper, ollama) |
+| `Procfile.devsidecar` | External postgres (web, jobs, whisper, ollama) |
+| `Procfile.devremote` | Remote Ollama server (postgres, web, jobs, whisper) |
+
+```bash
+# Start with local Ollama
+foreman start -f Procfile.dev
+
+# Start with remote Ollama (set OLLAMA_HOST in .env first)
+foreman start -f Procfile.devremote
 ```
-web: bin/rails server -p 3000
-whisper: /path/to/whisper.cpp/build/bin/whisper-server -m /path/to/models/ggml-large-v3.bin --host 127.0.0.1 --port 3333 -t 16 -p 8 --convert
-jobs: bin/rails solid_queue:start
-```
 
-Update the whisper path to match your installation.
+Configure paths and hosts via environment variables in `.env` (see `.env.example`).
 
 ### Background Jobs
 

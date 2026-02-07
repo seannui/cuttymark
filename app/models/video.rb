@@ -152,7 +152,6 @@ class Video < ApplicationRecord
   def process!(engine: nil)
     transcript_result = Transcription::TranscriptionService.new.transcribe(self, engine: engine)
     Embeddings::EmbeddingService.new.generate_for_transcript(transcript_result)
-    transcript_result.complete! if transcript_result.may_complete?
     finish_transcription! if may_finish_transcription?
     transcript_result
   end

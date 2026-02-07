@@ -1,0 +1,17 @@
+reunion_transcript:
+  video: reunion_video
+  state: completed
+  engine: whisper
+  raw_text: "We had a great time filming that summer in Oregon. The river scene was the hardest to shoot because of the weather conditions. Dan Aykroyd was incredible throughout the entire production. Ladies and gentlemen, the cast reunion was a memorable event for everyone involved."
+  transcription_started_at: <%= 1.hour.ago %>
+  created_at: <%= Time.current %>
+  updated_at: <%= Time.current %>
+
+interview_transcript:
+  video: interview_video
+  state: completed
+  engine: gemini
+  raw_text: "The documentary covers the entire production process from start to finish. Stand by me was one of the greatest films of that era."
+  transcription_started_at: <%= 2.hours.ago %>
+  created_at: <%= Time.current %>
+  updated_at: <%= Time.current %>

@@ -43,7 +43,10 @@ module Search
       keyword_matches.each do |match|
         combined[match.segment_id] = match
         # Exact phrase matches get highest score
-        if match.segment.text.downcase.include?(query_text)
+        # Check both segment text and transcript raw_text (segment text may be spaceless)
+        segment_text = match.segment.text.downcase
+        raw_text = match.segment.transcript.raw_text&.downcase || ""
+        if segment_text.include?(query_text) || raw_text.include?(query_text)
           match.update(relevance_score: 1.0)
         elsif match.relevance_score < 0.8
           # Partial word matches get boosted

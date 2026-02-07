@@ -6,9 +6,7 @@ require "base64"
 module Transcription
   class GeminiClient < BaseClient
     API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
-    # Use gemini-2.0-flash for reliability - no thinking tokens to worry about
-    # 8k output limit is sufficient for chunked transcription
-    DEFAULT_MODEL = "gemini-2.0-flash"
+    DEFAULT_MODEL = "gemini-2.5-flash"
     FILE_SIZE_THRESHOLD = 20 * 1024 * 1024  # 20MB - use File API above this
 
     # Compact prompt for long files - segments only, no word-level timestamps
@@ -132,6 +130,15 @@ module Transcription
                  end
 
       parse_response(response, compact: true)
+    rescue TranscriptionError => e
+      if e.message.include?("MAX_TOKENS")
+        # Retry with chunked mode if single request exceeded token limit
+        Rails.logger.warn("Single request hit MAX_TOKENS, falling back to chunked mode")
+        audio_duration = @ffmpeg.get_audio_duration(audio_path)
+        transcribe_chunked(audio_path, audio_duration)
+      else
+        raise
+      end
     end
 
     def transcribe_chunked(audio_path, total_duration)
@@ -154,6 +161,19 @@ module Transcription
 
         # Extract chunk audio
         chunk_path = extract_audio_chunk(audio_path, chunk_start, actual_duration, chunk_index)
+
+        unless File.exist?(chunk_path)
+          Rails.logger.warn("Chunk #{chunk_index + 1} audio extraction failed, skipping")
+          all_segments << SegmentData.new(
+            start_time: chunk_start, end_time: chunk_end,
+            text: "[Audio extraction failed]", confidence: 0.0, speaker: nil
+          )
+          full_text_parts << "[Audio extraction failed at #{format_time(chunk_start)} - #{format_time(chunk_end)}]"
+          chunk_index += 1
+          chunk_start = chunk_end - overlap
+          chunk_start = chunk_end if chunk_start >= total_duration - overlap
+          next
+        end
 
         begin
           # Transcribe chunk
@@ -193,6 +213,33 @@ module Transcription
           language = result.language
 
           Rails.logger.info("Chunk #{chunk_index + 1}: #{offset_segments.size} segments, #{offset_words.size} words")
+        rescue TranscriptionError => e
+          if e.message.include?("PROHIBITED_CONTENT") || e.message.include?("blocked")
+            Rails.logger.warn("Chunk #{chunk_index + 1} blocked by safety filter, skipping: #{e.message}")
+            placeholder = "[Content blocked by safety filter]"
+          elsif e.message.include?("Invalid JSON")
+            Rails.logger.warn("Chunk #{chunk_index + 1} returned malformed JSON, skipping: #{e.message}")
+            placeholder = "[Chunk transcription failed - malformed response]"
+          elsif e.message.include?("MAX_TOKENS")
+            Rails.logger.warn("Chunk #{chunk_index + 1} hit MAX_TOKENS, skipping: #{e.message}")
+            placeholder = "[Chunk transcription truncated]"
+          elsif e.message.include?("Empty response")
+            Rails.logger.warn("Chunk #{chunk_index + 1} returned empty response, skipping")
+            placeholder = nil
+          else
+            raise
+          end
+
+          if placeholder
+            all_segments << SegmentData.new(
+              start_time: chunk_start,
+              end_time: chunk_end,
+              text: placeholder,
+              confidence: 0.0,
+              speaker: nil
+            )
+            full_text_parts << "#{placeholder} at #{format_time(chunk_start)} - #{format_time(chunk_end)}"
+          end
         ensure
           # Clean up chunk file
           File.delete(chunk_path) if File.exist?(chunk_path)
@@ -507,16 +554,26 @@ module Transcription
       text_content = candidate.dig("content", "parts", 0, "text")
 
       if text_content.nil? || text_content.empty?
-        Rails.logger.error("Gemini candidate has no text content: #{candidate.to_json[0..1000]}")
-        raise TranscriptionError, "Empty response from Gemini (no text content)"
+        Rails.logger.warn("Gemini returned no text content (audio may be silent or too short)")
+        return Result.new(text: "", language: "en", duration: 0, segments: [], words: [])
       end
 
-      # Parse JSON response
+      # Sanitize JSON — Gemini sometimes returns timestamps in MM:SS.ms format
+      # instead of numeric seconds (e.g., "1:07.41" instead of 67.41)
+      sanitized_content = sanitize_timestamp_json(text_content)
+
+      # Parse JSON response, attempting repair if initial parse fails
       data = begin
-        JSON.parse(text_content)
+        JSON.parse(sanitized_content)
       rescue JSON::ParserError => e
-        Rails.logger.error("Failed to parse Gemini response as JSON (length=#{text_content.length}): #{text_content[-200..]}")
-        raise TranscriptionError, "Invalid JSON response from Gemini: #{e.message}"
+        Rails.logger.warn("Initial JSON parse failed, attempting repair: #{e.message}")
+        repaired = repair_json(sanitized_content)
+        begin
+          JSON.parse(repaired)
+        rescue JSON::ParserError => e2
+          Rails.logger.error("JSON repair failed (length=#{sanitized_content.length}): #{sanitized_content[0..500]}")
+          raise TranscriptionError, "Invalid JSON response from Gemini: #{e2.message}"
+        end
       end
 
       # Log if Gemini reports a different duration than expected
@@ -608,6 +665,56 @@ module Transcription
         last_segment&.dig("end").to_f,
         last_word&.dig("end").to_f
       ].max
+    end
+
+    # Convert MM:SS.ms or "MM:SS.ms" timestamp values to numeric seconds in JSON text
+    # Also fix double-decimal malformations like 12.345.88 -> 12.35
+    def sanitize_timestamp_json(json_text)
+      # Match "start": "1:07.41" or "end": "1:07.41" (quoted MM:SS format)
+      result = json_text.gsub(/("(?:start|end)":\s*)"(\d{1,3}):(\d{2}(?:\.\d+)?)"/) do
+        prefix = $1
+        minutes = $2.to_f
+        seconds = $3.to_f
+        "#{prefix}#{(minutes * 60 + seconds).round(2)}"
+      end
+
+      # Match "start": 1:07.41 or "end": 1:07.41 (unquoted — invalid JSON, causes parse error)
+      result = result.gsub(/("(?:start|end)":\s*)(\d{1,3}):(\d{2}(?:\.\d+)?)/) do
+        prefix = $1
+        minutes = $2.to_f
+        seconds = $3.to_f
+        "#{prefix}#{(minutes * 60 + seconds).round(2)}"
+      end
+
+      # Fix double-decimal timestamps like 12.345.88 -> 12.35
+      result.gsub(/("(?:start|end)":\s*)(\d+\.\d+)\.(\d+)/) do
+        prefix = $1
+        "#{prefix}#{$2.to_f.round(2)}"
+      end
+    end
+
+    # Attempt to repair common Gemini JSON output issues:
+    # - Unescaped quotes inside string values ("He said "Whoa!"" -> "He said \"Whoa!\"")
+    # - Truncated JSON (add missing closing brackets)
+    def repair_json(json_text)
+      # Fix unescaped quotes inside string values
+      # Strategy: walk through the JSON and escape internal quotes in string values
+      repaired = json_text.gsub(/("(?:text|speaker)":\s*")(.*?)("(?:\s*[,\}]))/) do |_match|
+        prefix = $1
+        value = $2
+        suffix = $3
+        # Escape any unescaped quotes within the value
+        escaped_value = value.gsub(/(?<!\\)"/, '\\"')
+        "#{prefix}#{escaped_value}#{suffix}"
+      end
+
+      # Close any unclosed brackets/braces (truncated response)
+      open_braces = repaired.count("{") - repaired.count("}")
+      open_brackets = repaired.count("[") - repaired.count("]")
+      repaired += "]" * open_brackets if open_brackets > 0
+      repaired += "}" * open_braces if open_braces > 0
+
+      repaired
     end
 
     def detect_mime_type(audio_path)

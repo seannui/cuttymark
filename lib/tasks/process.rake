@@ -70,6 +70,22 @@ namespace :cm do
   end
 
 
+  desc "Backfill search_vector for transcripts that have raw_text but null search_vector"
+  task backfill_search_vectors: :environment do
+    count = Transcript.where(search_vector: nil).where.not(raw_text: nil).count
+    if count == 0
+      puts "All transcripts already have search vectors."
+    else
+      puts "Backfilling search_vector for #{count} transcripts..."
+      ActiveRecord::Base.connection.execute(<<-SQL)
+        UPDATE transcripts
+        SET search_vector = to_tsvector('english', COALESCE(raw_text, ''))
+        WHERE raw_text IS NOT NULL AND search_vector IS NULL;
+      SQL
+      puts "Done. Updated #{count} transcripts."
+    end
+  end
+
   desc "Process a video file through the full pipeline: import, transcribe, embed"
   task :process, [:source_path, :project_name] => :environment do |_t, args|
     source_path = args[:source_path]

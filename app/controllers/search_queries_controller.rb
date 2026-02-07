@@ -43,9 +43,12 @@ class SearchQueriesController < ApplicationController
   end
 
   def destroy
-    project = @search_query.project
     @search_query.destroy
-    redirect_to project_path(project), notice: "Search query was deleted."
+
+    respond_to do |format|
+      format.turbo_stream { render turbo_stream: turbo_stream.remove(@search_query) }
+      format.html { redirect_to search_queries_path, notice: "Search query was deleted." }
+    end
   end
 
   def rerun

@@ -1,0 +1,8 @@
+# Development Procfile for use with remote Ollama server
+# Set OLLAMA_HOST in .env to point to your remote Ollama instance
+# Example: OLLAMA_HOST=192.168.1.100
+
+pg: postgres -D /opt/homebrew/var/postgres
+web: bin/wait-for-pg bin/rails server -p 3400
+jobs: bin/rails solid_queue:start
+whisper: ${WHISPER_SERVER_PATH:-/Users/sporter/git/whisper.cpp/build/bin/whisper-server} -m ${WHISPER_MODEL_PATH:-/Users/sporter/git/whisper.cpp/models/ggml-large-v3.bin} --host ${WHISPER_HOST:-127.0.0.1} --port ${WHISPER_PORT:-3333} -t 16 -p 8 --convert 2>&1 | tee -a log/whisper.log

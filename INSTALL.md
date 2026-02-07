@@ -257,3 +257,10 @@ If using mise for Ruby version management, configure VS Code:
 ```
 
 Or install the "mise" VS Code extension by jdx.
+
+
+### Reset dev datastores
+
+```bash
+rails db:drop db:create db:migrate && bin/rails db:schema:load:queue
+```

@@ -1,0 +1,2 @@
+web: bin/wait-for-pg bin/rails server -p 3400
+jobs: bin/rails solid_queue:start

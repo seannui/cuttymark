@@ -1,3 +1,5 @@
+<% content_for(:title) { "Search: #{@search_query.query_text.truncate(50)}" } %>
+
 <div class="mb-6">
   <%= link_to "&larr; Back to Searches".html_safe, search_queries_path, class: "text-sm text-indigo-600 hover:text-indigo-900" %>
 </div>
@@ -84,8 +86,8 @@
                   <%= number_to_percentage(match.relevance_score * 100, precision: 0) %> match
                 </span>
               </div>
-              <p class="text-sm text-gray-900 bg-gray-50 rounded p-3">
-                <%= match.context_text.presence || match.segment.text %>
+              <p class="text-sm text-gray-900 bg-gray-50 rounded p-3 break-words">
+                <%= transcript_excerpt(match.context_text.presence || match.segment.transcript.raw_text.presence || match.segment.text, @search_query.query_text) %>
               </p>
             </div>
             <div class="ml-4 flex-shrink-0">

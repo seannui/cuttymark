@@ -1,3 +1,5 @@
+<% content_for(:title) { @project.name } %>
+
 <div class="mb-6">
   <%= link_to "&larr; Back to Projects".html_safe, projects_path, class: "text-sm text-indigo-600 hover:text-indigo-900" %>
 </div>
@@ -130,7 +132,7 @@
                 <% end %>
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                <%= link_to "View", video_path(video), class: "text-indigo-600 hover:text-indigo-900" %>
+                <%= render 'videos/video_links', video: video %>
               </td>
             </tr>
           <% end %>

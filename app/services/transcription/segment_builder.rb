@@ -141,19 +141,39 @@ module Transcription
     def create_word_segments(words)
       return [] if words.empty?
 
-      # Merge BPE subword tokens into complete words
-      merged_words = merge_subword_tokens(words)
-
-      merged_words.map do |word|
-        @transcript.segments.create!(
-          text: word[:text],
-          start_time: word[:start_time],
-          end_time: word[:end_time],
-          confidence: word[:confidence],
-          speaker: word[:speaker],
-          segment_type: "word"
-        )
+      # Only merge BPE subword tokens if the words look like Whisper BPE output
+      # (Whisper BPE tokens have leading spaces to mark word boundaries)
+      if needs_bpe_merge?(words)
+        merged_words = merge_subword_tokens(words)
+        merged_words.map do |word|
+          @transcript.segments.create!(
+            text: word[:text],
+            start_time: word[:start_time],
+            end_time: word[:end_time],
+            confidence: word[:confidence],
+            speaker: word[:speaker],
+            segment_type: "word"
+          )
+        end
+      else
+        words.map do |word|
+          @transcript.segments.create!(
+            text: word.text.to_s.strip,
+            start_time: word.start_time,
+            end_time: word.end_time,
+            confidence: word.confidence,
+            speaker: word.speaker,
+            segment_type: "word"
+          )
+        end
       end
+    end
+
+    # Detect if words are Whisper BPE tokens (have leading spaces as word boundary markers)
+    def needs_bpe_merge?(words)
+      sample = words.first(50)
+      tokens_with_leading_space = sample.count { |w| w.text.to_s.start_with?(" ") }
+      tokens_with_leading_space > sample.size * 0.3
     end
 
     # Whisper uses BPE tokenization which splits words into subword tokens.

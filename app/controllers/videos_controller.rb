@@ -12,17 +12,17 @@ class VideosController < ApplicationController
   }.freeze
 
   def index
-    @videos = Video.includes(:project, :transcript)
+    base_scope = Video.includes(:project, :transcript)
 
     # Filter by project
     if params[:project_id].present?
-      @videos = @videos.where(project_id: params[:project_id])
+      base_scope = base_scope.where(project_id: params[:project_id])
       @filter_project = Project.find_by(id: params[:project_id])
     end
 
     # Filter by video state
     if params[:state].present? && Video.aasm.states.map(&:name).map(&:to_s).include?(params[:state])
-      @videos = @videos.where(state: params[:state])
+      base_scope = base_scope.where(state: params[:state])
       @filter_state = params[:state]
     end
 
@@ -30,21 +30,35 @@ class VideosController < ApplicationController
     if params[:transcript].present?
       case params[:transcript]
       when "none"
-        @videos = @videos.where.missing(:transcript)
+        base_scope = base_scope.where.missing(:transcript)
       when "completed"
-        @videos = @videos.joins(:transcript).where(transcripts: { state: "completed" })
+        base_scope = base_scope.joins(:transcript).where(transcripts: { state: "completed" })
       when "failed"
-        @videos = @videos.joins(:transcript).where(transcripts: { state: "failed" })
+        base_scope = base_scope.joins(:transcript).where(transcripts: { state: "failed" })
       when "processing"
-        @videos = @videos.joins(:transcript).where.not(transcripts: { state: %w[completed failed] })
+        base_scope = base_scope.joins(:transcript).where.not(transcripts: { state: %w[completed failed] })
       end
       @filter_transcript = params[:transcript]
     end
 
-    # Search by filename
     if params[:q].present?
-      @videos = @videos.where("filename ILIKE ?", "%#{params[:q]}%")
       @filter_query = params[:q]
+
+      # Filename matches
+      @videos = base_scope.where("filename ILIKE ?", "%#{params[:q]}%")
+
+      # Full-text transcript search
+      @transcript_matches = perform_transcript_search(base_scope) if params[:q].length >= 3
+
+      # Semantic transcript search (supplements full-text results)
+      if params[:q].length >= 3
+        semantic_matches = perform_semantic_search(base_scope)
+        if semantic_matches.present?
+          @transcript_matches = merge_transcript_matches(@transcript_matches, semantic_matches)
+        end
+      end
+    else
+      @videos = base_scope
     end
 
     # Sorting
@@ -229,6 +243,124 @@ class VideosController < ApplicationController
     else
       scope.order(Arel.sql("#{sql_column} #{dir}"))
     end
+  end
+
+  def perform_transcript_search(base_scope)
+    query_text = params[:q]
+
+    # Build transcript scope with same filters
+    transcripts = Transcript.joins(:video).where(state: "completed").where.not(search_vector: nil)
+    transcripts = transcripts.where(videos: { project_id: params[:project_id] }) if params[:project_id].present?
+    if params[:state].present? && Video.aasm.states.map(&:name).map(&:to_s).include?(params[:state])
+      transcripts = transcripts.where(videos: { state: params[:state] })
+    end
+
+    # Full-text search using plainto_tsquery (AND-combined terms)
+    sanitized_query = Transcript.sanitize_sql_array(["plainto_tsquery('english', ?)", query_text])
+    matched = transcripts
+      .where("search_vector @@ #{sanitized_query}")
+      .select("transcripts.*, ts_rank(search_vector, #{sanitized_query}) AS rank")
+      .order("rank DESC")
+      .limit(20)
+      .includes(:video)
+
+    # Exclude videos already found in filename search
+    filename_video_ids = base_scope.where("filename ILIKE ?", "%#{query_text}%").pluck(:id).to_set
+
+    matches = matched.filter_map do |transcript|
+      next if filename_video_ids.include?(transcript.video_id)
+
+      {
+        video: transcript.video,
+        segment: nil,
+        similarity: transcript.respond_to?(:rank) ? (0.5 + transcript.rank.to_f) : 0.8,
+        text: transcript.raw_text.to_s,
+        match_type: :fulltext
+      }
+    end
+
+    matches.presence
+  end
+
+  def merge_transcript_matches(fulltext_matches, semantic_matches)
+    fulltext_matches ||= []
+    semantic_matches ||= []
+
+    # Index existing video IDs from fulltext results
+    existing_ids = fulltext_matches.map { |m| m[:video].id }.to_set
+
+    # Append semantic matches that aren't already in fulltext results
+    semantic_matches.each do |match|
+      next if existing_ids.include?(match[:video].id)
+      fulltext_matches << match
+      existing_ids << match[:video].id
+    end
+
+    fulltext_matches.presence
+  end
+
+  def perform_semantic_search(base_scope)
+    embedding = Embeddings::OllamaClient.new.embed(params[:q])
+    return nil unless embedding
+
+    # Build segment scope with same filters applied via video join
+    segments = Segment.joins(transcript: :video)
+      .where(segment_type: "sentence")
+      .where.not(embedding: nil)
+
+    # Apply project filter
+    segments = segments.where(videos: { project_id: params[:project_id] }) if params[:project_id].present?
+
+    # Apply video state filter
+    if params[:state].present? && Video.aasm.states.map(&:name).map(&:to_s).include?(params[:state])
+      segments = segments.where(videos: { state: params[:state] })
+    end
+
+    # Apply transcript filter
+    if params[:transcript].present?
+      case params[:transcript]
+      when "none"
+        return nil # No segments exist for videos without transcripts
+      when "completed"
+        segments = segments.where(transcripts: { state: "completed" })
+      when "failed"
+        segments = segments.where(transcripts: { state: "failed" })
+      when "processing"
+        segments = segments.where.not(transcripts: { state: %w[completed failed] })
+      end
+    end
+
+    matched_segments = segments
+      .nearest_neighbors(:embedding, embedding, distance: "cosine")
+      .limit(100)
+
+    # Get IDs of filename-matched videos to exclude from semantic results
+    filename_video_ids = base_scope.where("filename ILIKE ?", "%#{params[:q]}%").pluck(:id).to_set
+
+    # Group by video, keep best (lowest distance) segment per video
+    grouped = {}
+    matched_segments.each do |segment|
+      similarity = 1.0 - segment.neighbor_distance
+      break if similarity < 0.35
+
+      video_id = segment.transcript.video_id
+      next if filename_video_ids.include?(video_id)
+
+      if !grouped[video_id] || similarity > grouped[video_id][:similarity]
+        grouped[video_id] = {
+          video: segment.transcript.video,
+          segment: segment,
+          similarity: similarity,
+          text: segment.transcript.raw_text.presence || segment.text
+        }
+      end
+    end
+
+    matches = grouped.values.sort_by { |m| -m[:similarity] }.first(20)
+    matches.presence
+  rescue Embeddings::OllamaClient::ConnectionError, Embeddings::OllamaClient::Error => e
+    Rails.logger.warn("Semantic search unavailable: #{e.message}")
+    nil
   end
 
   def transcription_engine_available?

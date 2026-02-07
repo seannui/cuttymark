@@ -12,9 +12,15 @@
   url: edit_clip_path(clip)
 } %>
 
-<% if clip.defined? || clip.failed? %>
+<% if clip.defined? %>
   <% links << {
     title: 'Render',
+    url: render_clip_clip_path(clip),
+    options: { method: :post }
+  } %>
+<% elsif clip.failed? %>
+  <% links << {
+    title: 'Retry',
     url: render_clip_clip_path(clip),
     options: { method: :post }
   } %>

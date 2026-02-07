@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_01_07_034508) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_06_211637) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -85,12 +85,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_01_07_034508) do
     t.datetime "created_at", null: false
     t.string "engine", default: "whisper"
     t.text "error_message"
+    t.string "model"
     t.text "raw_text"
+    t.tsvector "search_vector"
     t.string "state", default: "pending", null: false
     t.datetime "transcription_completed_at"
     t.datetime "transcription_started_at"
     t.datetime "updated_at", null: false
     t.bigint "video_id", null: false
+    t.index ["search_vector"], name: "index_transcripts_on_search_vector", using: :gin
     t.index ["state"], name: "index_transcripts_on_state"
     t.index ["video_id", "state"], name: "index_transcripts_on_video_id_and_state"
     t.index ["video_id"], name: "index_transcripts_on_video_id"

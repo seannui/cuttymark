@@ -1,3 +1,5 @@
+<% content_for(:title) { "Videos" } %>
+
 <div class="mb-8">
   <div class="flex items-center justify-between">
     <div>
@@ -15,7 +17,7 @@
   <%= form_tag videos_path, method: :get, class: "flex flex-wrap items-center gap-4" do %>
     <!-- Search -->
     <div class="flex-1 min-w-[200px]">
-      <%= text_field_tag :q, @filter_query, placeholder: "Search by filename...", class: "block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm" %>
+      <%= text_field_tag :q, @filter_query, placeholder: "Search filenames and transcripts...", class: "block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm" %>
     </div>
 
     <!-- Project Filter -->
@@ -88,32 +90,42 @@
   </div>
 <% end %>
 
+<% if !@filter_project && !@filter_state && !@filter_transcript && !@filter_query && (params[:page].blank? || params[:page] == "1") %>
 <!-- Stats Cards -->
 <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-  <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+  <%= link_to videos_path, class: "bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:border-indigo-300 transition-colors" do %>
     <div class="text-sm font-medium text-gray-500">Total</div>
     <div class="text-2xl font-semibold text-gray-900"><%= @total_count %></div>
-  </div>
-  <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+  <% end %>
+  <%= link_to videos_path(state: "ready"), class: "bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:border-green-300 transition-colors" do %>
     <div class="text-sm font-medium text-gray-500">Ready</div>
     <div class="text-2xl font-semibold text-green-600"><%= @state_counts["ready"] || 0 %></div>
-  </div>
-  <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+  <% end %>
+  <%= link_to videos_path(state: "transcribing"), class: "bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:border-yellow-300 transition-colors" do %>
     <div class="text-sm font-medium text-gray-500">Transcribing</div>
     <div class="text-2xl font-semibold text-yellow-600"><%= @state_counts["transcribing"] || 0 %></div>
-  </div>
-  <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+  <% end %>
+  <%= link_to videos_path(state: "transcribed"), class: "bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:border-indigo-300 transition-colors" do %>
     <div class="text-sm font-medium text-gray-500">Transcribed</div>
     <div class="text-2xl font-semibold text-indigo-600"><%= @state_counts["transcribed"] || 0 %></div>
-  </div>
-  <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+  <% end %>
+  <%= link_to videos_path(state: "error"), class: "bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:border-red-300 transition-colors" do %>
     <div class="text-sm font-medium text-gray-500">Error</div>
     <div class="text-2xl font-semibold text-red-600"><%= @state_counts["error"] || 0 %></div>
-  </div>
+  <% end %>
 </div>
+<% end %>
 
 <%= turbo_frame_tag "videos_table" do %>
+
+<% # Section header when search is active and we have semantic results %>
+<% if @filter_query && @transcript_matches.present? %>
+  <h2 class="text-lg font-semibold text-gray-900 mb-3">Filename matches (<%= @videos.total_count %>)</h2>
+<% end %>
+
 <% if @videos.any? %>
+  <div class="mb-4"><%= render 'shared/pagination', collection: @videos %></div>
+
   <div class="bg-white shadow-sm rounded-lg border border-gray-200">
     <div class="overflow-x-auto">
       <table class="min-w-full divide-y divide-gray-200">
@@ -182,23 +194,9 @@
       </table>
     </div>
 
-    <!-- Pagination -->
-    <% if @videos.total_pages > 1 %>
-      <div class="bg-white px-4 py-3 border-t border-gray-200 sm:px-6">
-        <div class="flex items-center justify-between">
-          <div class="text-sm text-gray-700">
-            Showing <span class="font-medium"><%= @videos.offset_value + 1 %></span> to
-            <span class="font-medium"><%= [@videos.offset_value + @videos.limit_value, @videos.total_count].min %></span> of
-            <span class="font-medium"><%= @videos.total_count %></span> results
-          </div>
-          <div class="flex space-x-2">
-            <%= paginate @videos %>
-          </div>
-        </div>
-      </div>
-    <% end %>
+    <%= render 'shared/pagination', collection: @videos %>
   </div>
-<% else %>
+<% elsif !@transcript_matches.present? %>
   <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
     <svg class="mx-auto h-16 w-16 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
@@ -217,4 +215,19 @@
     <% end %>
   </div>
 <% end %>
+
+<% # Transcript content matches section %>
+<% if @transcript_matches.present? %>
+  <div class="mt-8">
+    <h2 class="text-lg font-semibold text-gray-900 mb-3">Transcript content matches (<%= @transcript_matches.size %>)</h2>
+    <div class="bg-white shadow-sm rounded-lg border border-gray-200 overflow-hidden">
+      <ul class="divide-y divide-gray-200">
+        <% @transcript_matches.each do |match| %>
+          <%= render "transcript_match_row", match: match %>
+        <% end %>
+      </ul>
+    </div>
+  </div>
+<% end %>
+
 <% end %>

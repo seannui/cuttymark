@@ -1,3 +1,5 @@
+<% content_for(:title) { "Search Queries" } %>
+
 <div class="mb-8">
   <div class="flex items-center justify-between">
     <div>
@@ -25,7 +27,7 @@
       </thead>
       <tbody class="bg-white divide-y divide-gray-200">
         <% @search_queries.each do |query| %>
-          <tr class="hover:bg-gray-50">
+          <tr id="<%= dom_id(query) %>" class="hover:bg-gray-50">
             <td class="px-6 py-4">
               <%= link_to query.query_text, search_query_path(query), class: "text-sm font-medium text-gray-900 hover:text-indigo-600", data: { turbo_frame: "_top" } %>
             </td>

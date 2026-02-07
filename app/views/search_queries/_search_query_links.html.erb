@@ -19,7 +19,7 @@
 <% links << {
   title: 'Delete',
   url: search_query_path(search_query),
-  options: { method: :delete, data: { turbo_confirm: 'Delete this search query and all its matches?' } }
+  options: { method: :delete, data: { turbo_confirm: 'Delete this search query and all its matches?', turbo_frame: false } }
 } %>
 
 <%= render 'shared/actions_dropdown', links: links %>

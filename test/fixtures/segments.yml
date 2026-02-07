@@ -1,0 +1,59 @@
+normal_sentence_one:
+  transcript: reunion_transcript
+  text: "We had a great time filming that summer in Oregon."
+  segment_type: sentence
+  start_time: 10.0
+  end_time: 14.5
+  confidence: 0.95
+  created_at: <%= Time.current %>
+  updated_at: <%= Time.current %>
+
+normal_sentence_two:
+  transcript: reunion_transcript
+  text: "The river scene was the hardest to shoot because of the weather conditions."
+  segment_type: sentence
+  start_time: 14.5
+  end_time: 20.0
+  confidence: 0.92
+  created_at: <%= Time.current %>
+  updated_at: <%= Time.current %>
+
+garbage_too_long:
+  transcript: reunion_transcript
+  text: "<%= 'x' * 35_000 %>"
+  segment_type: sentence
+  start_time: 20.0
+  end_time: 25.0
+  confidence: 0.10
+  created_at: <%= Time.current %>
+  updated_at: <%= Time.current %>
+
+garbage_no_spaces:
+  transcript: reunion_transcript
+  text: "<%= 'Ihadalotoffunwithhim' * 50 %>"
+  segment_type: sentence
+  start_time: 25.0
+  end_time: 30.0
+  confidence: 0.15
+  created_at: <%= Time.current %>
+  updated_at: <%= Time.current %>
+
+garbage_repetitive:
+  transcript: reunion_transcript
+  text: "<%= (['yes yes yes'] * 300).join(' ') %>"
+  segment_type: sentence
+  start_time: 30.0
+  end_time: 35.0
+  confidence: 0.20
+  created_at: <%= Time.current %>
+  updated_at: <%= Time.current %>
+
+interview_sentence:
+  transcript: interview_transcript
+  text: "The documentary covers the entire production process from start to finish."
+  segment_type: sentence
+  start_time: 60.0
+  end_time: 65.0
+  confidence: 0.98
+  created_at: <%= Time.current %>
+  updated_at: <%= Time.current %>

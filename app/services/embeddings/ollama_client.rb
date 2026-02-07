@@ -7,10 +7,12 @@ module Embeddings
     class Error < StandardError; end
     class ConnectionError < Error; end
     class ModelError < Error; end
+    class InputTooLargeError < Error; end
 
     DEFAULT_HOST = "127.0.0.1"
     DEFAULT_PORT = 11434
     DEFAULT_MODEL = "nomic-embed-text"
+    MAX_INPUT_CHARS = 30_000
 
     def initialize(host: nil, port: nil, model: nil)
       @host = host || ENV.fetch("OLLAMA_HOST", DEFAULT_HOST)
@@ -21,6 +23,7 @@ module Embeddings
     def embed(text)
       return nil if text.blank?
 
+      validate_input_length!(text)
       embed_batch([text]).first
     end
 
@@ -30,6 +33,7 @@ module Embeddings
       results = []
       texts.each_slice(batch_size) do |batch|
         batch.each do |text|
+          validate_input_length!(text)
           results << generate_embedding(text)
         end
       end
@@ -79,8 +83,23 @@ module Embeddings
         embeddings&.first
       when Net::HTTPNotFound
         raise ModelError, "Model '#{@model}' not found. Run: ollama pull #{@model}"
+      when Net::HTTPBadRequest
+        body = response.body.to_s
+        if body.include?("context length") || body.include?("too long") || body.include?("input length")
+          raise InputTooLargeError, "Input exceeds model context length: #{body.truncate(200)}"
+        end
+        raise Error, "Ollama error: #{response.code} - #{body.truncate(200)}"
       else
-        raise Error, "Ollama error: #{response.code} - #{response.body}"
+        raise Error, "Ollama error: #{response.code} - #{response.body.to_s.truncate(200)}"
+      end
+    end
+
+    def validate_input_length!(text)
+      return if text.nil?
+
+      if text.length > MAX_INPUT_CHARS
+        raise InputTooLargeError,
+          "Input text too large (#{text.length} chars, max #{MAX_INPUT_CHARS})"
       end
     end
   end

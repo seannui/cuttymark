@@ -1,3 +1,5 @@
+<% content_for(:title) { @clip.display_title } %>
+
 <div class="mb-6">
   <%= link_to "&larr; Back to Video".html_safe, video_path(@clip.video), class: "text-sm text-indigo-600 hover:text-indigo-900" %>
 </div>

@@ -1,3 +1,5 @@
+<% content_for(:title) { "Edit #{@video.filename}" } %>
+
 <div class="mb-6">
   <%= link_to "&larr; Back to Video".html_safe, video_path(@video), class: "text-sm text-indigo-600 hover:text-indigo-900" %>
 </div>

@@ -23,7 +23,7 @@ module Transcription
       # Create or find transcript record
       transcript = video.transcript || video.create_transcript!
       transcript.start_processing! if transcript.may_start_processing?
-      transcript.update!(engine: client.engine_name, transcription_started_at: Time.current)
+      transcript.update!(engine: client.engine_name, model: client.model_name, transcription_started_at: Time.current)
 
       begin
         # Extract audio
@@ -107,10 +107,15 @@ module Transcription
       # Use a cached audio path based on video ID
       cached_audio_path = audio_cache_path(video)
 
-      # Check if cached audio exists and is newer than source video
+      # Check if cached audio exists, is newer than source, and duration matches
       if File.exist?(cached_audio_path) && File.mtime(cached_audio_path) >= File.mtime(source_path)
-        Rails.logger.info("Using cached audio file: #{cached_audio_path}")
-        return cached_audio_path
+        if video.audio_cache_valid?(cached_audio_path, @ffmpeg)
+          Rails.logger.info("Using cached audio file: #{cached_audio_path}")
+          return cached_audio_path
+        else
+          Rails.logger.warn("Cached audio duration mismatch, re-extracting: #{cached_audio_path}")
+          File.delete(cached_audio_path)
+        end
       end
 
       # Determine optimal audio settings for engine

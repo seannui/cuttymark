@@ -1,3 +1,5 @@
+<% content_for(:title) { @video.filename } %>
+
 <div class="mb-6">
   <%= link_to "&larr; Back to Project".html_safe, project_path(@video.project), class: "text-sm text-indigo-600 hover:text-indigo-900" %>
 </div>
@@ -107,7 +109,7 @@
       <div class="flex items-center space-x-3">
         <% if @transcript.engine.present? %>
           <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-            <%= @transcript.engine.capitalize %>
+            <%= @transcript.model.presence || @transcript.engine.capitalize %>
           </span>
         <% end %>
         <% if @transcript.transcription_duration_formatted.present? %>
