@@ -90,7 +90,10 @@
                 <%= transcript_excerpt(match.context_text.presence || match.segment.transcript.raw_text.presence || match.segment.text, @search_query.query_text) %>
               </p>
             </div>
-            <div class="ml-4 flex-shrink-0">
+            <div class="ml-4 flex-shrink-0 flex items-center space-x-2">
+              <% if match.video.hls_ready? %>
+                <%= link_to "Preview", video_path(match.video, t: [match.segment.start_time - 5, 0].max, anchor: "player"), class: "inline-flex items-center px-3 py-1.5 border border-gray-300 text-xs font-medium rounded text-gray-700 bg-white hover:bg-gray-50" %>
+              <% end %>
               <% if match.has_clip? %>
                 <%= link_to "View Clip", clip_path(match.clip), class: "inline-flex items-center px-3 py-1.5 border border-gray-300 text-xs font-medium rounded text-gray-700 bg-white hover:bg-gray-50" %>
               <% else %>

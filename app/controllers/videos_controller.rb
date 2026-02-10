@@ -1,5 +1,5 @@
 class VideosController < ApplicationController
-  before_action :set_video, only: %i[show edit update destroy transcribe reprocess]
+  before_action :set_video, only: %i[show edit update destroy transcribe reprocess encode_hls hls]
 
   # Allowed sort columns and their SQL expressions
   SORT_COLUMNS = {
@@ -39,6 +39,17 @@ class VideosController < ApplicationController
         base_scope = base_scope.joins(:transcript).where.not(transcripts: { state: %w[completed failed] })
       end
       @filter_transcript = params[:transcript]
+    end
+
+    # Filter by HLS state
+    if params[:hls].present?
+      case params[:hls]
+      when "none"
+        base_scope = base_scope.where(hls_state: nil)
+      when "completed", "processing", "pending", "failed"
+        base_scope = base_scope.where(hls_state: params[:hls])
+      end
+      @filter_hls = params[:hls]
     end
 
     if params[:q].present?
@@ -219,6 +230,33 @@ class VideosController < ApplicationController
     @video.queue_for_reprocessing!
 
     redirect_back fallback_location: @video, notice: "Reprocessing started for #{@video.filename}."
+  end
+
+  def encode_hls
+    unless File.exist?(@video.playable_path)
+      redirect_back fallback_location: @video, alert: "Video file not found at: #{@video.playable_path}"
+      return
+    end
+
+    @video.update!(hls_state: "pending")
+    HlsEncodeJob.perform_later(@video.id)
+
+    redirect_back fallback_location: @video, notice: "HLS encoding queued for #{@video.filename}."
+  end
+
+  def hls
+    hls_file = @video.hls_path.join(params[:path]).cleanpath
+    unless hls_file.to_s.start_with?(@video.hls_path.to_s) && File.exist?(hls_file)
+      head :not_found and return
+    end
+
+    content_type = case File.extname(hls_file)
+                   when ".m3u8" then "application/vnd.apple.mpegurl"
+                   when ".ts"   then "video/mp2t"
+                   else "application/octet-stream"
+                   end
+
+    send_file hls_file, type: content_type, disposition: "inline"
   end
 
   private

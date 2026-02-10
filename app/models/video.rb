@@ -169,8 +169,34 @@ class Video < ApplicationRecord
     VideoReprocessJob.perform_later(id)
   end
 
+  # HLS streaming methods
+  def hls_path
+    self.class.hls_dir.join("video_#{id}")
+  end
+
+  def hls_master_playlist
+    hls_path.join("master.m3u8")
+  end
+
+  def hls_ready?
+    hls_state == "completed" && hls_master_playlist.exist?
+  end
+
+  def source_resolution
+    [metadata&.dig("video_width"), metadata&.dig("video_height")]
+  end
+
   # Class methods for batch operations
   class << self
+    # Get the configured HLS storage directory path
+    def hls_dir
+      if ENV["CUTTYMARK_HLS_PATH"].present?
+        Pathname.new(ENV["CUTTYMARK_HLS_PATH"])
+      else
+        Rails.root.join("storage", "hls")
+      end
+    end
+
     # Get the configured sources directory path
     # Reads from CUTTYMARK_SOURCES_PATH env var, falls back to storage/sources
     def sources_dir

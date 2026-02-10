@@ -455,6 +455,31 @@ namespace :cm do
     puts ""
   end
 
+  desc "Enqueue HLS encoding for all transcribed videos without HLS"
+  task enqueue_hls: :environment do
+    scope = Video.transcribed.where(hls_state: [nil, "failed"])
+
+    if scope.empty?
+      puts "No videos need HLS encoding."
+      exit 0
+    end
+
+    puts "Queueing HLS encoding for #{scope.count} videos..."
+    puts ""
+
+    count = 0
+    scope.find_each do |video|
+      video.update!(hls_state: "pending")
+      HlsEncodeJob.perform_later(video.id)
+      puts "  Queued: #{video.filename} (ID: #{video.id})"
+      count += 1
+    end
+
+    puts ""
+    puts "#{count} videos queued for HLS encoding."
+    puts "Monitor progress: http://localhost:3000/jobs"
+  end
+
   desc "Search a video transcript for a phrase"
   task :search, [:video_id, :query] => :environment do |_t, args|
     video_id = args[:video_id]

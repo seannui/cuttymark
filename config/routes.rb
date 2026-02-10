@@ -10,6 +10,8 @@ Rails.application.routes.draw do
     member do
       post :transcribe
       post :reprocess
+      post :encode_hls
+      get "hls/*path", action: :hls, as: :hls, format: false
     end
   end
 

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_06_211637) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_07_024752) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -105,6 +105,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_06_211637) do
     t.bigint "file_size"
     t.string "filename", null: false
     t.string "format"
+    t.string "hls_state"
     t.jsonb "metadata", default: {}
     t.bigint "project_id", null: false
     t.string "proxy_path"
@@ -112,6 +113,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_06_211637) do
     t.string "state", default: "pending", null: false
     t.datetime "updated_at", null: false
     t.index ["filename"], name: "index_videos_on_filename"
+    t.index ["hls_state"], name: "index_videos_on_hls_state"
     t.index ["project_id"], name: "index_videos_on_project_id"
     t.index ["source_path"], name: "index_videos_on_source_path", unique: true
     t.index ["state"], name: "index_videos_on_state"

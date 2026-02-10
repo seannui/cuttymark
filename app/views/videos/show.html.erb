@@ -101,6 +101,65 @@
   </dl>
 </div>
 
+<!-- HLS Video Player -->
+<div id="player" class="bg-white shadow-sm rounded-lg border border-gray-200 overflow-hidden mb-8">
+  <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+    <h2 class="text-lg font-medium text-gray-900">Video Preview</h2>
+    <div class="flex items-center space-x-3">
+      <% if @video.hls_state.present? %>
+        <% badge_class = case @video.hls_state
+             when "completed" then "bg-green-100 text-green-800"
+             when "processing" then "bg-yellow-100 text-yellow-800"
+             when "pending" then "bg-blue-100 text-blue-800"
+             when "failed" then "bg-red-100 text-red-800"
+             end %>
+        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium <%= badge_class %>">
+          HLS: <%= @video.hls_state.capitalize %>
+        </span>
+      <% end %>
+      <% unless @video.hls_state == "processing" || @video.hls_state == "pending" %>
+        <%= button_to @video.hls_ready? ? "Re-encode HLS" : "Generate HLS",
+              encode_hls_video_path(@video),
+              method: :post,
+              class: "inline-flex items-center px-3 py-1.5 border border-gray-300 text-xs font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50" %>
+      <% end %>
+    </div>
+  </div>
+
+  <% if @video.hls_ready? %>
+    <div class="p-6 bg-black" data-controller="video-player" data-video-player-start-time-value="<%= params[:t].to_f %>">
+      <video
+        data-video-player-target="video"
+        class="video-js vjs-big-play-centered"
+        controls
+        preload="auto">
+        <source src="<%= hls_video_path(@video, path: "master.m3u8") %>" type="application/vnd.apple.mpegurl">
+        <p class="vjs-no-js">
+          To view this video please enable JavaScript, and consider upgrading to a web browser that supports HTML5 video
+        </p>
+      </video>
+    </div>
+  <% elsif @video.hls_state == "processing" || @video.hls_state == "pending" %>
+    <div class="px-6 py-8 text-center text-gray-500">
+      <svg class="mx-auto h-8 w-8 text-gray-400 animate-spin" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+      </svg>
+      <p class="mt-2">HLS encoding in progress...</p>
+    </div>
+  <% elsif @video.hls_state == "failed" %>
+    <div class="px-6 py-4">
+      <div class="rounded-md bg-red-50 p-4">
+        <p class="text-sm text-red-700">HLS encoding failed. Check logs for details.</p>
+      </div>
+    </div>
+  <% else %>
+    <div class="px-6 py-8 text-center text-gray-500">
+      <p>No HLS stream available. Click "Generate HLS" to create a streaming preview.</p>
+    </div>
+  <% end %>
+</div>
+
 <!-- Transcript Section -->
 <div class="bg-white shadow-sm rounded-lg border border-gray-200 overflow-hidden mb-8">
   <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">

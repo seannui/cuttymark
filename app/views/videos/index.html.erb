@@ -51,6 +51,20 @@
             class: "block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm" %>
     </div>
 
+    <!-- HLS Filter -->
+    <div class="w-36">
+      <%= select_tag :hls,
+            options_for_select([
+              ["All HLS", ""],
+              ["No HLS", "none"],
+              ["Completed", "completed"],
+              ["Processing", "processing"],
+              ["Pending", "pending"],
+              ["Failed", "failed"]
+            ], params[:hls]),
+            class: "block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm" %>
+    </div>
+
     <!-- Submit -->
     <div>
       <%= submit_tag "Filter", class: "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 cursor-pointer" %>
@@ -59,7 +73,7 @@
 </div>
 
 <!-- Active Filters Display -->
-<% if @filter_project || @filter_state || @filter_transcript || @filter_query %>
+<% if @filter_project || @filter_state || @filter_transcript || @filter_hls || @filter_query %>
   <div class="mb-6 bg-indigo-50 border border-indigo-200 rounded-lg p-4">
     <div class="flex items-center justify-between">
       <div class="flex items-center gap-2 flex-wrap">
@@ -84,13 +98,18 @@
             Transcript: <%= @filter_transcript.titleize %>
           </span>
         <% end %>
+        <% if @filter_hls %>
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+            HLS: <%= @filter_hls.titleize %>
+          </span>
+        <% end %>
       </div>
       <%= link_to "Clear filters", videos_path, class: "text-sm text-indigo-600 hover:text-indigo-900" %>
     </div>
   </div>
 <% end %>
 
-<% if !@filter_project && !@filter_state && !@filter_transcript && !@filter_query && (params[:page].blank? || params[:page] == "1") %>
+<% if !@filter_project && !@filter_state && !@filter_transcript && !@filter_hls && !@filter_query && (params[:page].blank? || params[:page] == "1") %>
 <!-- Stats Cards -->
 <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
   <%= link_to videos_path, class: "bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:border-indigo-300 transition-colors" do %>
@@ -146,6 +165,7 @@
             <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               <%= sortable_header("transcript", "Transcript", @sort_column, @sort_direction) %>
             </th>
+            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">HLS</th>
             <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
           </tr>
         </thead>
@@ -180,6 +200,21 @@
                 <% if video.transcript %>
                   <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium <%= video.transcript.completed? ? 'bg-green-100 text-green-800' : video.transcript.failed? ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800' %>">
                     <%= video.transcript.aasm.current_state.to_s.titleize %>
+                  </span>
+                <% else %>
+                  <span class="text-sm text-gray-400">-</span>
+                <% end %>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <% if video.hls_state.present? %>
+                  <% hls_badge = case video.hls_state
+                       when "completed" then "bg-green-100 text-green-800"
+                       when "processing" then "bg-yellow-100 text-yellow-800"
+                       when "pending" then "bg-blue-100 text-blue-800"
+                       when "failed" then "bg-red-100 text-red-800"
+                       end %>
+                  <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium <%= hls_badge %>">
+                    <%= video.hls_state.capitalize %>
                   </span>
                 <% else %>
                   <span class="text-sm text-gray-400">-</span>
